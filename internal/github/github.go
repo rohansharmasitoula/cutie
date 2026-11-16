@@ -1,4 +1,5 @@
-// Package github loads your open PRs and the PRs you review through the gh CLI.
+// Package github loads your open PRs, the PRs you review and the issues assigned to
+// you through the gh CLI.
 package github
 
 import (
@@ -154,15 +155,17 @@ fragment F on PullRequest {
 }`
 
 // listQuery is the cheap poll (a few rate-limit points): which PRs are open and when
-// each last changed. Details are fetched only for PRs that changed.
+// each last changed, plus your assigned issues in full. PR details are fetched only
+// for PRs that changed.
 const listQuery = `query {
   viewer { login }
   rateLimit { remaining limit resetAt }
   mine: search(query: "is:pr is:open author:@me archived:false", type: ISSUE, first: 50) { nodes { ...L } }
   requested: search(query: "is:pr is:open review-requested:@me archived:false", type: ISSUE, first: 50) { nodes { ...L } }
   reviewed: search(query: "is:pr is:open reviewed-by:@me -author:@me archived:false", type: ISSUE, first: 50) { nodes { ...L } }
+  issues: search(query: "is:issue is:open assignee:@me archived:false", type: ISSUE, first: 100) { nodes { ...I } }
 }
-fragment L on PullRequest { id updatedAt }`
+fragment L on PullRequest { id updatedAt }` + issueFields
 
 // detailQuery loads full PR data for a batch of node IDs (about 2 points per PR).
 const detailQuery = `query($ids: [ID!]!) {
@@ -331,10 +334,19 @@ type listNode struct {
 	UpdatedAt time.Time `json:"updatedAt"`
 }
 
-// Fetch returns your login, your open PRs, the open PRs you review, and the rate limit.
-// A PR is re-fetched when it is new, its updatedAt moved, or its CI was still running
-// (check results do not move updatedAt).
-func (f *Fetcher) Fetch() (login string, mine, review []PR, rate RateLimit, err error) {
+// Snapshot is one poll's result.
+type Snapshot struct {
+	Login  string
+	Mine   []PR // your open PRs
+	Review []PR // open PRs you review
+	Issues []Issue
+	Rate   RateLimit
+}
+
+// Fetch returns your login, your open PRs, the open PRs you review, your assigned
+// issues and the rate limit. A PR is re-fetched when it is new, its updatedAt moved,
+// or its CI was still running (check results do not move updatedAt).
+func (f *Fetcher) Fetch() (Snapshot, error) {
 	var list struct {
 		Viewer struct {
 			Login string `json:"login"`
@@ -343,11 +355,17 @@ func (f *Fetcher) Fetch() (login string, mine, review []PR, rate RateLimit, err 
 		Mine      struct{ Nodes []listNode } `json:"mine"`
 		Requested struct{ Nodes []listNode } `json:"requested"`
 		Reviewed  struct{ Nodes []listNode } `json:"reviewed"`
+		Issues    struct{ Nodes []rawIssue } `json:"issues"`
 	}
 	if err := graphql(&list, listQuery); err != nil {
-		return "", nil, nil, RateLimit{}, err
+		return Snapshot{}, err
 	}
-	rate = list.RateLimit
+	s := Snapshot{Login: list.Viewer.Login, Rate: list.RateLimit}
+	for _, r := range list.Issues.Nodes {
+		if r.Number > 0 { // search can return non-issue nodes as empty objects
+			s.Issues = append(s.Issues, convertIssue(r))
+		}
+	}
 
 	var stale []string
 	open := map[string]bool{}
@@ -373,9 +391,9 @@ func (f *Fetcher) Fetch() (login string, mine, review []PR, rate RateLimit, err 
 			Nodes     []rawPR   `json:"nodes"`
 		}
 		if err := graphql(&detail, detailQuery, args...); err != nil {
-			return "", nil, nil, rate, err
+			return Snapshot{Rate: s.Rate}, err
 		}
-		rate = detail.RateLimit
+		s.Rate = detail.RateLimit
 		for _, r := range detail.Nodes {
 			if r.ID != "" {
 				f.cache[r.ID] = r
@@ -388,10 +406,9 @@ func (f *Fetcher) Fetch() (login string, mine, review []PR, rate RateLimit, err 
 		}
 	}
 
-	me := list.Viewer.Login
 	for _, n := range list.Mine.Nodes {
 		if r, ok := f.cache[n.ID]; ok {
-			mine = append(mine, convert(r, me, true))
+			s.Mine = append(s.Mine, convert(r, s.Login, true))
 		}
 	}
 	seen := map[string]bool{}
@@ -402,10 +419,10 @@ func (f *Fetcher) Fetch() (login string, mine, review []PR, rate RateLimit, err 
 				continue
 			}
 			seen[n.ID] = true
-			review = append(review, convert(r, me, false))
+			s.Review = append(s.Review, convert(r, s.Login, false))
 		}
 	}
-	return me, mine, review, rate, nil
+	return s, nil
 }
 
 func ciRunning(r rawPR) bool {

@@ -2,7 +2,6 @@ package ui
 
 import (
 	"fmt"
-	"github.com/rohansharmasitoula/cutie/internal/agents"
 	"github.com/rohansharmasitoula/cutie/internal/github"
 	"github.com/rohansharmasitoula/cutie/internal/herdr"
 	"github.com/rohansharmasitoula/cutie/internal/utils"
@@ -292,8 +291,8 @@ func (m model) footer() string {
 		line1 = accent.Render(" / ") + m.input.View() + dim.Render("   enter keep · esc clear")
 	case inputPrompt:
 		name := ""
-		if p := m.selectedPR(); p != nil {
-			name = agents.Name(*p)
+		if w, ok := m.selectedWork(); ok {
+			name = w.agent
 		}
 		line1 = accent.Render(" → "+name+" ") + m.input.View() + dim.Render("   enter send · esc cancel")
 	default:
@@ -303,7 +302,7 @@ func (m model) footer() string {
 			line1 = dim.Render(" " + m.status)
 		}
 	}
-	keys := " enter agent · w watch · p prompt · x close agent · o open · tab mine/review · / filter · s sort · g group · b bots · d drafts · space fold · R force · drag borders to resize · = reset · ? help · q quit"
+	keys := " enter agent · w watch · p prompt · x close agent · o open · tab mine/review/issues · / filter · s sort · g group · b bots · d drafts · space fold · R force · drag borders to resize · = reset · ? help · q quit"
 	return utils.Fit(line1, m.width) + "\n" + dim.Render(utils.Fit(keys, m.width))
 }
 
@@ -311,6 +310,9 @@ func (m model) footer() string {
 
 func (m model) listTitle() string {
 	t := fmt.Sprintf("PRs · sort %s", m.sort)
+	if m.tab == tabIssues {
+		t = "Issues assigned to you · sort " + m.sort.String()
+	}
 	if m.grouped {
 		t += " · by repo"
 	}
@@ -337,7 +339,7 @@ func (m model) listBody(w int) []string {
 		}
 		return n
 	}
-	tabs := tab("Mine", len(m.mine), m.tab == 0) + " " + tab("Review", len(m.review), m.tab == 1)
+	tabs := tab("Mine", len(m.mine), m.tab == tabMine) + " " + tab("Review", len(m.review), m.tab == tabReview) + " " + tab("Issues", len(m.issues), m.tab == tabIssues)
 	var notes []string
 	if n := countNeed(m.mine); n > 0 {
 		notes = append(notes, bad.Render(fmt.Sprintf("%d need you", n)))
@@ -377,6 +379,9 @@ func (m model) renderItem(it item, selected bool, w int) string {
 		}
 		return line
 	}
+	if it.issue != nil {
+		return m.renderIssue(*it.issue, selected, w)
+	}
 	p := *it.pr
 	watch := " "
 	if _, ok := m.watches[p.Key()]; ok {
@@ -396,16 +401,7 @@ func (m model) renderItem(it item, selected bool, w int) string {
 		indent = strings.Repeat("  ", it.depth-1) + dim.Render("└ ")
 	}
 
-	var right []string
-	if _, a, ok := m.agentFor(p); ok {
-		cell := "● " + a.Status
-		if c := utils.Money(a.Cost); c != "" {
-			cell += " " + c
-		}
-		right = append(right, fg(agentColor[a.Status], cell))
-	} else if m.inflight[p.Key()] {
-		right = append(right, dim.Render("◌ starting"))
-	}
+	right := m.agentCell(prWork(p))
 	if n := p.Open(); n > 0 {
 		right = append(right, bad.Render(fmt.Sprintf("%d open", n)))
 	}
@@ -420,6 +416,43 @@ func (m model) renderItem(it item, selected bool, w int) string {
 	}
 
 	left := fmt.Sprintf(" %s %s %s %s%s %s", watch, badge, ci, indent, bold.Render(ref), p.Title)
+	line := utils.Spread(left, strings.Join(right, "  "), w)
+	if selected {
+		return sel.Render(ansi.Strip(line))
+	}
+	return line
+}
+
+// agentCell is a row's agent status (with cost) or "starting", if any.
+func (m model) agentCell(wk work) []string {
+	if a, ok := m.byName[wk.agent]; ok {
+		cell := "● " + a.Status
+		if c := utils.Money(a.Cost); c != "" {
+			cell += " " + c
+		}
+		return []string{fg(agentColor[a.Status], cell)}
+	}
+	if m.inflight[wk.key] {
+		return []string{dim.Render("◌ starting")}
+	}
+	return nil
+}
+
+func (m model) renderIssue(i github.Issue, selected bool, w int) string {
+	ref := fmt.Sprintf("#%d", i.Number)
+	if !m.grouped {
+		ref = i.RepoName + " " + ref
+	}
+	right := m.agentCell(issueWork(i))
+	if len(i.Labels) > 0 {
+		right = append(right, fg(cPurple, strings.Join(i.Labels, ",")))
+	}
+	if i.Comments > 0 {
+		right = append(right, dim.Render(fmt.Sprintf("💬%d", i.Comments)))
+	}
+	right = append(right, dim.Render("@"+i.Author), fg(waitColor(time.Since(i.UpdatedAt)), utils.Ago(i.UpdatedAt)))
+
+	left := fmt.Sprintf("   %s %s %s", utils.Fit(fg(cCyan, "issue"), 11), bold.Render(ref), i.Title)
 	line := utils.Spread(left, strings.Join(right, "  "), w)
 	if selected {
 		return sel.Render(ansi.Strip(line))
@@ -446,10 +479,16 @@ func (m model) detail(w int) (string, []string) {
 	}
 	it := m.selectedItem()
 	if it == nil {
-		return "Detail", []string{dim.Render("select a PR")}
+		return "Detail", []string{dim.Render("select a PR or issue")}
 	}
 	if it.header {
+		if m.tab == tabIssues {
+			return it.repo, []string{fmt.Sprintf("%d issue(s) assigned to you", it.count), "", dim.Render("space folds the group")}
+		}
 		return it.repo, m.repoSummary(it.repo)
+	}
+	if it.issue != nil {
+		return m.issueDetail(*it.issue, w)
 	}
 	p := *it.pr
 	var l []string
@@ -508,29 +547,15 @@ func (m model) detail(w int) (string, []string) {
 		add(bold.Render("Reviewers ") + strings.Join(rs, dim.Render(" · ")))
 	}
 
-	// Agent
-	name, a, ok := m.agentFor(p)
-	add("")
-	if ok {
-		head := bold.Render("Agent ") + name + " " + fg(agentColor[a.Status], "● "+a.Status)
-		if c := utils.Money(a.Cost); c != "" {
-			head += dim.Render(" · ") + c
+	what := ""
+	if p.Status.Actionable() {
+		what = "a reviewer"
+		if p.Mine {
+			what = "an orchestrator"
 		}
-		add(head)
-		if m.tailFor == name {
-			for _, t := range m.tail {
-				add(dim.Render("  › " + t))
-			}
-		}
-	} else if m.inflight[p.Key()] {
-		add(dim.Render("Agent " + name + " starting…"))
-	} else if p.Status.Actionable() {
-		what := "an orchestrator"
-		if !p.Mine {
-			what = "a reviewer"
-		}
-		add(accent.Render("⏎ enter") + dim.Render(" starts "+what+" as "+name))
 	}
+	add("")
+	add(m.agentLines(prWork(p), what)...)
 
 	// Threads go last: they can be long, and the panel cuts what does not fit.
 	if n := p.Unresolved(); n > 0 {
@@ -554,6 +579,54 @@ func (m model) detail(w int) (string, []string) {
 		}
 	}
 	return fmt.Sprintf("%s #%d", p.RepoName, p.Number), l
+}
+
+// agentLines is the detail pane's agent section: the live agent with its latest output,
+// "starting", or how to start one (as `what`, empty when there is nothing to do).
+func (m model) agentLines(wk work, what string) []string {
+	if a, ok := m.byName[wk.agent]; ok {
+		head := bold.Render("Agent ") + wk.agent + " " + fg(agentColor[a.Status], "● "+a.Status)
+		if c := utils.Money(a.Cost); c != "" {
+			head += dim.Render(" · ") + c
+		}
+		l := []string{head}
+		if m.tailFor == wk.agent {
+			for _, t := range m.tail {
+				l = append(l, dim.Render("  › "+t))
+			}
+		}
+		return l
+	}
+	if m.inflight[wk.key] {
+		return []string{dim.Render("Agent " + wk.agent + " starting…")}
+	}
+	if what != "" {
+		return []string{accent.Render("⏎ enter") + dim.Render(" starts "+what+" as "+wk.agent)}
+	}
+	return nil
+}
+
+func (m model) issueDetail(i github.Issue, w int) (string, []string) {
+	l := []string{
+		bold.Render(i.Title),
+		dim.Render(fmt.Sprintf("@%s · opened %s ago · updated %s ago", i.Author, utils.Ago(i.CreatedAt), utils.Ago(i.UpdatedAt))),
+	}
+	var meta []string
+	if len(i.Labels) > 0 {
+		meta = append(meta, fg(cPurple, strings.Join(i.Labels, " · ")))
+	}
+	meta = append(meta, dim.Render(fmt.Sprintf("%d comment(s)", i.Comments)))
+	l = append(l, strings.Join(meta, dim.Render(" · ")), "")
+	l = append(l, m.agentLines(issueWork(i), "an agent on the issue")...)
+
+	// The body goes last: it can be long, and the panel cuts what does not fit.
+	if body := strings.TrimSpace(strings.ReplaceAll(i.Body, "\r", "")); body != "" {
+		l = append(l, "", bold.Render("Description"))
+		for _, line := range strings.Split(ansi.Wrap(body, max(w-2, 10), ""), "\n") {
+			l = append(l, dim.Render(line))
+		}
+	}
+	return fmt.Sprintf("%s #%d", i.RepoName, i.Number), l
 }
 
 func (m model) repoSummary(repo string) []string {
@@ -584,12 +657,12 @@ func helpLines() []string {
 	rows := [][2]string{
 		{"↑↓ j k, wheel", "move"},
 		{"click", "select; click again = enter"},
-		{"enter", "jump to the PR's agent, or start one"},
-		{"p", "send a prompt to the PR's agent"},
-		{"x x", "close the PR's agent pane (asks first)"},
-		{"w", "watch: wake the agent on new feedback / commits"},
-		{"o", "open the PR in the browser"},
-		{"tab, 1, 2", "Mine / Review"},
+		{"enter", "jump to the row's agent, or start one"},
+		{"p", "send a prompt to the row's agent"},
+		{"x x", "close the row's agent pane (asks first)"},
+		{"w", "watch a PR: wake the agent on new feedback / commits"},
+		{"o", "open the PR or issue in the browser"},
+		{"tab, 1, 2, 3", "Mine / Review / Issues"},
 		{"/", "filter by text (esc clears)"},
 		{"s", "sort: urgent → updated → waiting"},
 		{"g", "group by repo on/off"},

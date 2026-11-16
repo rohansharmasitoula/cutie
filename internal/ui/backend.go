@@ -14,7 +14,7 @@ import (
 // The live one talks to gh, herdr and omp; the demo one serves made-up data.
 // Calls run inside tea.Cmd goroutines, one poll of each kind at a time.
 type backend interface {
-	PRs() (login string, mine, review []github.PR, rate github.RateLimit, err error)
+	Snapshot() (github.Snapshot, error)
 	Agents() ([]herdr.Agent, error)
 	Tail(agent string, lines int) ([]string, error)
 	Limits() ([]omp.Limit, error)
@@ -42,7 +42,7 @@ type liveBackend struct {
 	meter *omp.CostMeter
 }
 
-func (b *liveBackend) PRs() (string, []github.PR, []github.PR, github.RateLimit, error) {
+func (b *liveBackend) Snapshot() (github.Snapshot, error) {
 	return b.gh.Fetch()
 }
 
@@ -90,18 +90,21 @@ func (b *liveBackend) Open(url string) error {
 // demoBackend serves the made-up data in demo.go and only pretends to act.
 type demoBackend struct {
 	mine, review []github.PR
+	issues       []github.Issue
 }
 
 func newDemoBackend() *demoBackend {
 	mine, review := demoPRs()
-	return &demoBackend{mine: mine, review: review}
+	return &demoBackend{mine: mine, review: review, issues: demoIssues()}
 }
 
-func (b *demoBackend) PRs() (string, []github.PR, []github.PR, github.RateLimit, error) {
+func (b *demoBackend) Snapshot() (github.Snapshot, error) {
 	_, _, rate := demoUsage()
-	return "you", b.mine, b.review, rate, nil
+	return github.Snapshot{Login: "you", Mine: b.mine, Review: b.review, Issues: b.issues, Rate: rate}, nil
 }
-func (b *demoBackend) Agents() ([]herdr.Agent, error)      { return demoAgents(b.mine, b.review), nil }
+func (b *demoBackend) Agents() ([]herdr.Agent, error) {
+	return demoAgents(b.mine, b.review, b.issues), nil
+}
 func (b *demoBackend) Tail(string, int) ([]string, error)  { return demoTail(), nil }
 func (b *demoBackend) Limits() ([]omp.Limit, error)        { l, _, _ := demoUsage(); return l, nil }
 func (b *demoBackend) Stats() (omp.Stats, error)           { _, s, _ := demoUsage(); return s, nil }

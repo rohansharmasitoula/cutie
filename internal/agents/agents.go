@@ -1,5 +1,5 @@
-// Package agents decides how cutie names, starts, prompts and wakes the omp agent
-// that works on a PR.
+// Package agents decides how cutie names, starts, prompts and wakes the agent that
+// works on a PR or an issue.
 package agents
 
 import (
@@ -20,14 +20,21 @@ import (
 var nameInvalid = regexp.MustCompile(`[^a-z0-9-]+`)
 
 // Name is the herdr agent name that ties a pane to a PR, e.g. "fix-my-service-42".
-// herdr names must match [a-z][a-z0-9_-]{0,31}, so the repo part is trimmed to fit.
 func Name(p github.PR) string {
-	prefix := "rev"
 	if p.Mine {
-		prefix = "fix"
+		return name("fix", p.RepoName, p.Number)
 	}
-	num := fmt.Sprintf("%d", p.Number)
-	repo := strings.Trim(nameInvalid.ReplaceAllString(strings.ToLower(p.RepoName), "-"), "-")
+	return name("rev", p.RepoName, p.Number)
+}
+
+// IssueName is the herdr agent name for an issue, e.g. "iss-my-service-7".
+func IssueName(i github.Issue) string { return name("iss", i.RepoName, i.Number) }
+
+// name joins prefix, repo and number. herdr names must match [a-z][a-z0-9_-]{0,31},
+// so the repo part is trimmed to fit.
+func name(prefix, repoName string, number int) string {
+	num := fmt.Sprintf("%d", number)
+	repo := strings.Trim(nameInvalid.ReplaceAllString(strings.ToLower(repoName), "-"), "-")
 	if room := 32 - len(prefix) - len(num) - 2; len(repo) > room {
 		repo = strings.TrimRight(repo[:room], "-")
 	}
@@ -41,6 +48,9 @@ func TabLabel(p github.PR) string {
 	}
 	return fmt.Sprintf("review #%d", p.Number)
 }
+
+// IssueTabLabel is the herdr tab label used for an issue inside its repo workspace.
+func IssueTabLabel(i github.Issue) string { return fmt.Sprintf("issue #%d", i.Number) }
 
 // Baseline is the value a watcher compares against to detect new activity.
 func Baseline(p github.PR) string {
@@ -66,9 +76,9 @@ func Triggered(p github.PR, baseline string) bool {
 //go:embed prompts/*.md
 var defaultPrompts embed.FS
 
-// promptNames are the four messages cutie sends: start or follow up, on your PR (fix)
-// or someone else's (review).
-var promptNames = []string{"fix-start", "fix-followup", "review-start", "review-followup"}
+// promptNames are the messages cutie sends: start or follow up, on your PR (fix) or
+// someone else's (review), and start on an issue assigned to you.
+var promptNames = []string{"fix-start", "fix-followup", "review-start", "review-followup", "issue-start"}
 
 // Prompts are the message templates sent to agents. Each is a Go text/template over
 // PromptData; a file <name>.md in the override folder replaces the built-in one.
@@ -76,10 +86,16 @@ type Prompts struct {
 	t map[string]*template.Template
 }
 
-// PromptData is what a prompt template can use, e.g. {{.URL}} or {{.Branch}}.
+// PromptData is what a PR prompt template can use, e.g. {{.URL}} or {{.Branch}}.
 type PromptData struct {
 	URL, Repo, Branch, Base, Author, HeadShort string
 	Number                                     int
+}
+
+// IssueData is what the issue prompt template can use, e.g. {{.URL}} or {{.Title}}.
+type IssueData struct {
+	URL, Repo, Title, Author string
+	Number                   int
 }
 
 // LoadPrompts reads the built-in templates, replacing any that dir overrides.
@@ -118,9 +134,18 @@ func (ps Prompts) render(p github.PR, stage string) (string, error) {
 	if len(head) > 7 {
 		head = head[:7]
 	}
-	var b strings.Builder
-	err := ps.t[side+"-"+stage].Execute(&b, PromptData{
+	return ps.execute(side+"-"+stage, PromptData{
 		URL: p.URL, Repo: p.Repo, Branch: p.Branch, Base: p.Base, Author: p.Author, HeadShort: head, Number: p.Number,
 	})
+}
+
+// IssueStart is the first message to a new agent for the issue.
+func (ps Prompts) IssueStart(i github.Issue) (string, error) {
+	return ps.execute("issue-start", IssueData{URL: i.URL, Repo: i.Repo, Title: i.Title, Author: i.Author, Number: i.Number})
+}
+
+func (ps Prompts) execute(name string, data any) (string, error) {
+	var b strings.Builder
+	err := ps.t[name].Execute(&b, data)
 	return b.String(), err
 }

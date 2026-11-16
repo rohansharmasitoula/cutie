@@ -49,15 +49,35 @@ func demoPRs() (mine, review []github.PR) {
 	return mine, review
 }
 
-func demoAgents(mine, review []github.PR) []herdr.Agent {
-	agent := func(p github.PR, status string, cost float64) herdr.Agent {
-		return herdr.Agent{Name: agents.Name(p), Kind: "omp", Status: status, PaneID: "w2:" + agents.Name(p), Cost: cost}
+func demoAgents(mine, review []github.PR, issues []github.Issue) []herdr.Agent {
+	agent := func(name, status string, cost float64) herdr.Agent {
+		return herdr.Agent{Name: name, Kind: "omp", Status: status, PaneID: "w2:" + name, Cost: cost}
 	}
 	return []herdr.Agent{
-		agent(mine[0], "working", 3.12),
-		agent(review[1], "blocked", 1.48),
-		agent(mine[1], "done", 6.35),
+		agent(agents.Name(mine[0]), "working", 3.12),
+		agent(agents.Name(review[1]), "blocked", 1.48),
+		agent(agents.Name(mine[1]), "done", 6.35),
+		agent(agents.IssueName(issues[0]), "working", 0.87),
 		{Kind: "omp", Status: "idle", PaneID: "w1:p1", Title: "π main: planning the Q3 migration", Cost: 0.92},
+	}
+}
+
+func demoIssues() []github.Issue {
+	now := time.Now()
+	issue := func(repo string, n int, title, author string, labels []string, comments int, age time.Duration, body string) github.Issue {
+		return github.Issue{
+			Repo: "acme/" + repo, RepoName: repo, Number: n, Title: title, Author: author, Labels: labels,
+			URL: "https://github.com/acme/" + repo + "/issues/", Comments: comments, Body: body,
+			CreatedAt: now.Add(-4 * age), UpdatedAt: now.Add(-age),
+		}
+	}
+	return []github.Issue{
+		issue("api", 430, "Rate-limit the public search endpoint", "maya", []string{"backend", "security"}, 4, 3*time.Hour,
+			"Search has no limit per API key, so one client can starve the others.\n\nAcceptance:\n- 60 requests a minute per key, configurable\n- 429 with a Retry-After header\n- a metric for rejected requests"),
+		issue("web", 251, "Dark mode for the settings pages", "leo", []string{"frontend"}, 1, 26*time.Hour,
+			"The settings pages ignore the theme toggle and stay light."),
+		issue("infra", 110, "Alert when the job queue backs up", "sam", []string{"ops"}, 0, 72*time.Hour,
+			"Page on-call when the queue is over 1,000 jobs for 10 minutes."),
 	}
 }
 

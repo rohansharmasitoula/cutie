@@ -30,10 +30,8 @@ const (
 // ---- messages ----
 
 type prsMsg struct {
-	login        string
-	mine, review []github.PR
-	rate         github.RateLimit
-	err          error
+	snap github.Snapshot
+	err  error
 }
 type rateMsg struct{ rate github.RateLimit }
 type agentsMsg struct {
@@ -92,20 +90,21 @@ type model struct {
 	login   string
 	mine    []github.PR
 	review  []github.PR
+	issues  []github.Issue
 	agents  []herdr.Agent
 	byName  map[string]herdr.Agent
 	limits  []omp.Limit
 	stats   *omp.Stats
 	watches state.Watches
-	// inflight marks PR keys with an agent start or prompt running.
+	// inflight marks PR and issue keys with an agent start or prompt running.
 	inflight map[string]bool
 	events   []Event
 
-	tail    []string // output of the selected PR's agent
+	tail    []string // output of the selected row's agent
 	tailFor string   // agent name the tail belongs to
 
 	// view state
-	tab        int // 0 mine, 1 review
+	tab        int // tabMine, tabReview or tabIssues
 	grouped    bool
 	sort       sortMode
 	hideBots   bool
@@ -175,8 +174,8 @@ func (m model) tick(msg tea.Msg) tea.Cmd {
 func (m model) fetchPRs() tea.Cmd {
 	be := m.be
 	return func() tea.Msg {
-		login, mine, review, rate, err := be.PRs()
-		return prsMsg{login, mine, review, rate, err}
+		snap, err := be.Snapshot()
+		return prsMsg{snap, err}
 	}
 }
 
@@ -196,14 +195,14 @@ func (m model) fetchAgents() tea.Cmd {
 	}
 }
 
-// tailCmd reads the selected PR's agent output, if it has a live agent.
+// tailCmd reads the selected row's agent output, if it has a live agent.
 func (m model) tailCmd() tea.Cmd {
-	p := m.selectedPR()
-	if p == nil {
+	w, ok := m.selectedWork()
+	if !ok {
 		return nil
 	}
-	name, _, live := m.agentFor(*p)
-	if !live {
+	name := w.agent
+	if _, live := m.byName[name]; !live {
 		return nil
 	}
 	be := m.be
@@ -250,36 +249,71 @@ func (m *model) addEvents(evs ...Event) {
 	}
 }
 
-// repoDir finds the PR's clone: a folder named after the repo, directly in the root or
+// repoDir finds a repo's clone: a folder named after the repo, directly in the root or
 // one folder down (e.g. ~/Development/acme/api), so clones grouped by org work as is.
-func (m model) repoDir(p github.PR) (string, error) {
+func (m model) repoDir(repo, repoName string) (string, error) {
 	if m.cfg.Demo {
 		return "", nil
 	}
-	nested, _ := filepath.Glob(filepath.Join(m.cfg.Root, "*", p.RepoName))
-	for _, dir := range append([]string{filepath.Join(m.cfg.Root, p.RepoName)}, nested...) {
+	nested, _ := filepath.Glob(filepath.Join(m.cfg.Root, "*", repoName))
+	for _, dir := range append([]string{filepath.Join(m.cfg.Root, repoName)}, nested...) {
 		if st, err := os.Stat(dir); err == nil && st.IsDir() {
 			return dir, nil
 		}
 	}
-	return "", fmt.Errorf("no clone of %s in %s or one folder below it (set CUTIE_ROOT to the folder holding your clones)", p.Repo, m.cfg.Root)
+	return "", fmt.Errorf("no clone of %s in %s or one folder below it (set CUTIE_ROOT to the folder holding your clones)", repo, m.cfg.Root)
 }
 
 // ---- list items ----
 
+const (
+	tabMine = iota
+	tabReview
+	tabIssues
+	tabCount
+)
+
+// item is one list row: a repo header, a PR or an issue.
 type item struct {
 	header bool
 	repo   string
 	count  int
 	pr     *github.PR
+	issue  *github.Issue
 	depth  int // stack depth inside a repo group
+}
+
+// work is what an agent works on, a PR or an issue, as the agent actions need it.
+type work struct {
+	key, url, repo, repoName string
+	number                   int
+	agent, tab               string // herdr agent name and tab label
+}
+
+func prWork(p github.PR) work {
+	return work{p.Key(), p.URL, p.Repo, p.RepoName, p.Number, agents.Name(p), agents.TabLabel(p)}
+}
+
+func issueWork(i github.Issue) work {
+	return work{i.Key(), i.URL, i.Repo, i.RepoName, i.Number, agents.IssueName(i), agents.IssueTabLabel(i)}
+}
+
+// work is the row's PR or issue; repo headers have none.
+func (it item) work() (work, bool) {
+	switch {
+	case it.pr != nil:
+		return prWork(*it.pr), true
+	case it.issue != nil:
+		return issueWork(*it.issue), true
+	}
+	return work{}, false
 }
 
 func (m model) collapseKey(repo string) string { return fmt.Sprintf("%d/%s", m.tab, repo) }
 
 func (m model) visiblePRs() []github.PR {
 	src := m.mine
-	if m.tab == 1 {
+	if m.tab == tabReview {
 		src = m.review
 	}
 	f := strings.ToLower(m.filter)
@@ -298,8 +332,11 @@ func (m model) visiblePRs() []github.PR {
 }
 
 func (m model) hiddenCount() int {
+	if m.tab == tabIssues {
+		return 0 // bots and drafts are PR filters
+	}
 	src := m.mine
-	if m.tab == 1 {
+	if m.tab == tabReview {
 		src = m.review
 	}
 	n := 0
@@ -337,6 +374,9 @@ var longLived = map[string]bool{
 // items is the list as displayed: repo headers (when grouped) and PRs, with stacked
 // PRs (base branch = another listed PR's branch) indented under their parent.
 func (m model) items() []item {
+	if m.tab == tabIssues {
+		return m.issueItems()
+	}
 	prs := m.visiblePRs()
 	if !m.grouped {
 		out := make([]item, len(prs))
@@ -396,6 +436,59 @@ func (m model) items() []item {
 	return out
 }
 
+// visibleIssues is the Issues tab after the filter, newest activity first (oldest
+// first when sorting by waiting).
+func (m model) visibleIssues() []github.Issue {
+	f := strings.ToLower(m.filter)
+	var out []github.Issue
+	for _, i := range m.issues {
+		if f != "" && !strings.Contains(strings.ToLower(fmt.Sprintf("%s #%d %s @%s %s", i.RepoName, i.Number, i.Title, i.Author, strings.Join(i.Labels, " "))), f) {
+			continue
+		}
+		out = append(out, i)
+	}
+	sort.SliceStable(out, func(a, b int) bool {
+		if m.sort == sortWaiting {
+			return out[a].UpdatedAt.Before(out[b].UpdatedAt)
+		}
+		return out[a].UpdatedAt.After(out[b].UpdatedAt)
+	})
+	return out
+}
+
+// issueItems lists issues, under repo headers when grouped.
+func (m model) issueItems() []item {
+	is := m.visibleIssues()
+	if !m.grouped {
+		out := make([]item, len(is))
+		for k := range is {
+			out[k] = item{issue: &is[k]}
+		}
+		return out
+	}
+	byRepo := map[string][]*github.Issue{}
+	var repos []string
+	for k := range is {
+		r := is[k].RepoName
+		if _, ok := byRepo[r]; !ok {
+			repos = append(repos, r)
+		}
+		byRepo[r] = append(byRepo[r], &is[k])
+	}
+	sort.Strings(repos)
+	var out []item
+	for _, r := range repos {
+		out = append(out, item{header: true, repo: r, count: len(byRepo[r])})
+		if m.collapsed[m.collapseKey(r)] {
+			continue
+		}
+		for _, i := range byRepo[r] {
+			out = append(out, item{repo: r, issue: i})
+		}
+	}
+	return out
+}
+
 func (m model) selectedItem() *item {
 	its := m.items()
 	if m.cursor < 0 || m.cursor >= len(its) {
@@ -409,6 +502,14 @@ func (m model) selectedPR() *github.PR {
 		return it.pr
 	}
 	return nil
+}
+
+// selectedWork is the selected row's PR or issue.
+func (m model) selectedWork() (work, bool) {
+	if it := m.selectedItem(); it != nil {
+		return it.work()
+	}
+	return work{}, false
 }
 
 // allPRs is both sections, for watchers and change detection.
@@ -429,15 +530,21 @@ func (m model) agentFor(p github.PR) (string, herdr.Agent, bool) {
 
 // startCmd finds or creates the PR's pane and starts an agent there with the start prompt.
 func (m model) startCmd(p github.PR, note string) tea.Cmd {
-	dir, dirErr := m.repoDir(p)
-	name, kind, be := agents.Name(p), m.cfg.AgentKind, m.be
-	prompt, promptErr := m.prompts.Start(p)
+	prompt, err := m.prompts.Start(p)
+	return m.startWorkCmd(prWork(p), prompt, err, note)
+}
+
+// startWorkCmd finds or creates w's pane in its repo workspace and starts an agent
+// there with prompt.
+func (m model) startWorkCmd(w work, prompt string, promptErr error, note string) tea.Cmd {
+	dir, dirErr := m.repoDir(w.repo, w.repoName)
+	kind, be := m.cfg.AgentKind, m.be
 	return func() tea.Msg {
 		err := errors.Join(dirErr, promptErr)
 		if err == nil {
-			err = be.Start(p.RepoName, agents.TabLabel(p), dir, name, kind, prompt)
+			err = be.Start(w.repoName, w.tab, dir, w.agent, kind, prompt)
 		}
-		return dispatchMsg{key: p.Key(), note: note, err: err}
+		return dispatchMsg{key: w.key, note: note, err: err}
 	}
 }
 
@@ -554,32 +661,42 @@ func (m model) activate() (model, tea.Cmd) {
 		m.collapsed[k] = !m.collapsed[k]
 		return m, nil
 	}
-	p := *it.pr
-	name, _, live := m.agentFor(p)
-	if live {
-		if err := m.be.Focus(name); err != nil {
+	w, _ := it.work()
+	if _, live := m.byName[w.agent]; live {
+		if err := m.be.Focus(w.agent); err != nil {
 			m.setStatus(err.Error(), true)
 		} else {
-			m.setStatus("jumped to "+name, false)
+			m.setStatus("jumped to "+w.agent, false)
 		}
 		return m, nil
 	}
-	if m.inflight[p.Key()] {
-		m.setStatus(name+" is already starting", false)
+	if m.inflight[w.key] {
+		m.setStatus(w.agent+" is already starting", false)
 		return m, nil
 	}
-	if !p.Status.Actionable() {
-		m.setStatus(fmt.Sprintf("#%d is %s: nothing for an agent to do", p.Number, p.Status.Label()), false)
-		return m, nil
+	var cmd tea.Cmd
+	if it.issue != nil {
+		prompt, err := m.prompts.IssueStart(*it.issue)
+		cmd = m.startWorkCmd(w, prompt, err, "started "+w.agent)
+	} else {
+		p := *it.pr
+		if !p.Status.Actionable() {
+			m.setStatus(fmt.Sprintf("#%d is %s: nothing for an agent to do", p.Number, p.Status.Label()), false)
+			return m, nil
+		}
+		cmd = m.startCmd(p, "started "+w.agent)
 	}
-	m.inflight[p.Key()] = true
-	m.setStatus("starting "+name+"…", false)
-	return m, m.startCmd(p, "started "+name)
+	m.inflight[w.key] = true
+	m.setStatus("starting "+w.agent+"…", false)
+	return m, cmd
 }
 
 func (m model) toggleWatch() model {
 	p := m.selectedPR()
 	if p == nil {
+		if it := m.selectedItem(); it != nil && it.issue != nil {
+			m.setStatus("watchers follow PRs; issues have none", false)
+		}
 		return m
 	}
 	if _, ok := m.watches[p.Key()]; ok {
@@ -648,21 +765,21 @@ func (m model) update(msg tea.Msg) (model, tea.Cmd) {
 			}
 			return m, nil
 		}
-		m.rate = msg.rate
+		m.rate = msg.snap.Rate
 		var cmds []tea.Cmd
 		if !m.refreshed.IsZero() {
 			prev := map[string]github.PR{}
 			for _, p := range m.allPRs() {
 				prev[p.Key()] = p
 			}
-			m.login, m.mine, m.review = msg.login, msg.mine, msg.review
+			m.login, m.mine, m.review, m.issues = msg.snap.Login, msg.snap.Mine, msg.snap.Review, msg.snap.Issues
 			next := map[string]github.PR{}
 			for _, p := range m.allPRs() {
 				next[p.Key()] = p
 			}
 			m.addEvents(PREvents(prev, next, time.Now())...)
 		} else {
-			m.login, m.mine, m.review = msg.login, msg.mine, msg.review
+			m.login, m.mine, m.review, m.issues = msg.snap.Login, msg.snap.Mine, msg.snap.Review, msg.snap.Issues
 		}
 		m.refreshed = time.Now()
 		// The list refreshes every minute; watchers act at most every watchGap, so
@@ -813,13 +930,12 @@ func (m model) updateInput(msg tea.KeyMsg) (model, tea.Cmd) {
 		m.mode = inputNone
 		m.input.Blur()
 		if mode == inputPrompt && text != "" {
-			p := m.selectedPR()
-			if p == nil {
+			w, ok := m.selectedWork()
+			if !ok {
 				return m, nil
 			}
-			name := agents.Name(*p)
-			m.setStatus("sending to "+name+"…", false)
-			return m, m.promptCmd(p.Key(), name, text, "sent to "+name)
+			m.setStatus("sending to "+w.agent+"…", false)
+			return m, m.promptCmd(w.key, w.agent, text, "sent to "+w.agent)
 		}
 		return m, nil
 	}
@@ -832,17 +948,18 @@ func (m model) updateInput(msg tea.KeyMsg) (model, tea.Cmd) {
 	return m, cmd
 }
 
-// closeAgent closes the pane of the selected PR's agent. The first `x` asks for
-// confirmation (it ends the agent's session); a second `x` on the same PR closes it.
+// closeAgent closes the pane of the selected row's agent. The first `x` asks for
+// confirmation (it ends the agent's session); a second `x` on the same row closes it.
 func (m model) closeAgent() (model, tea.Cmd) {
-	p := m.selectedPR()
-	if p == nil {
+	w, ok := m.selectedWork()
+	if !ok {
 		return m, nil
 	}
-	name, a, live := m.agentFor(*p)
+	name := w.agent
+	a, live := m.byName[name]
 	if !live {
 		m.confirmClose = ""
-		m.setStatus(fmt.Sprintf("#%d has no agent pane to close", p.Number), true)
+		m.setStatus(fmt.Sprintf("#%d has no agent pane to close", w.number), true)
 		return m, nil
 	}
 	if m.confirmClose != name {
@@ -856,7 +973,7 @@ func (m model) closeAgent() (model, tea.Cmd) {
 	}
 	m.confirmClose = ""
 	m.setStatus("closing "+name+"…", false)
-	key, pane, be := p.Key(), a.PaneID, m.be
+	key, pane, be := w.key, a.PaneID, m.be
 	return m, func() tea.Msg {
 		return dispatchMsg{key: key, note: "closed " + name + "'s pane", err: be.Close(pane)}
 	}
@@ -885,13 +1002,16 @@ func (m model) updateKey(msg tea.KeyMsg) (model, tea.Cmd) {
 		m.cursor = 0
 	case "end":
 		m.cursor = len(m.items()) - 1
-	case "tab", "shift+tab":
-		m.tab = 1 - m.tab
-		m.cursor = 0
+	case "tab":
+		m.tab, m.cursor = (m.tab+1)%tabCount, 0
+	case "shift+tab":
+		m.tab, m.cursor = (m.tab+tabCount-1)%tabCount, 0
 	case "1":
-		m.tab, m.cursor = 0, 0
+		m.tab, m.cursor = tabMine, 0
 	case "2":
-		m.tab, m.cursor = 1, 0
+		m.tab, m.cursor = tabReview, 0
+	case "3":
+		m.tab, m.cursor = tabIssues, 0
 	default:
 		moved = false
 	}
@@ -918,8 +1038,8 @@ func (m model) updateKey(msg tea.KeyMsg) (model, tea.Cmd) {
 	case "w":
 		m = m.toggleWatch()
 	case "o":
-		if p := m.selectedPR(); p != nil {
-			if err := m.be.Open(p.URL); err != nil {
+		if w, ok := m.selectedWork(); ok {
+			if err := m.be.Open(w.url); err != nil {
 				m.setStatus(err.Error(), true)
 			}
 		}
@@ -941,12 +1061,12 @@ func (m model) updateKey(msg tea.KeyMsg) (model, tea.Cmd) {
 		m.input.CursorEnd()
 		return m, m.input.Focus()
 	case "p":
-		p := m.selectedPR()
-		if p == nil {
+		w, ok := m.selectedWork()
+		if !ok {
 			return m, nil
 		}
-		if _, _, live := m.agentFor(*p); !live {
-			m.setStatus(fmt.Sprintf("#%d has no agent to prompt", p.Number), true)
+		if _, live := m.byName[w.agent]; !live {
+			m.setStatus(fmt.Sprintf("#%d has no agent to prompt", w.number), true)
 			return m, nil
 		}
 		m.mode = inputPrompt

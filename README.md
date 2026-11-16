@@ -17,9 +17,9 @@ cutie lists your open PRs and the PRs waiting for your review, tells you which o
 
 | | |
 |---|---|
-| 📋 **One inbox for PRs** | Your open PRs and the ones waiting for your review, side by side in two tabs, grouped by repo. Stacked PRs nest under the PR they build on. |
+| 📋 **One inbox for PRs and issues** | Your open PRs, the ones waiting for your review and the issues assigned to you, in three tabs grouped by repo. Stacked PRs nest under the PR they build on. |
 | 🎯 **Only what needs you** | A PR is flagged when a reviewer is waiting on your reply or commented after your last push. Threads you've already answered stay quiet. |
-| ⚡ **An agent in one keystroke** | Press `enter` on a PR: cutie opens the repo in herdr, starts a coding agent in its own tab and hands it the PR. Press it again to jump there. |
+| ⚡ **An agent in one keystroke** | Press `enter` on a PR or an issue: cutie opens the repo in herdr, starts a coding agent in its own tab and hands it the work. Press it again to jump there. |
 | 👀 **See every agent at work** | Each agent's status, cost and latest output, right beside the PR's checks, reviewers and open threads. |
 | 🔔 **Watchers** | Watch a PR and its agent wakes up by itself when reviewers reply to yours, or when the author pushes to one you're reviewing. |
 | 💸 **Claude usage, always visible** | Your 5 hour and 7 day limits with reset timers, 24h spend, tokens per hour and model split. Watchers pause before you run out. |
@@ -55,7 +55,7 @@ go build -o ~/.local/bin/cutie .
 
 1. Keep your clones in one folder, each named after its repo, either directly (`~/Development/api`) or one folder down (`~/Development/acme/api`). Point cutie at it with `CUTIE_ROOT` if it isn't `~/Development`.
 2. Start herdr in one terminal and `cutie` in another, or run cutie inside a herdr pane.
-3. Press `enter` on a PR marked `needs work` or `to review`.
+3. Press `enter` on a PR marked `needs work` or `to review`, or on an issue in the Issues tab.
 
 Try it without GitHub or herdr, on made-up data:
 
@@ -86,8 +86,9 @@ To use your own, put a file with the same name in `~/Library/Application Support
 | `fix-followup.md` | A watcher sees new review feedback on your PR |
 | `review-start.md` | Starting an agent on someone else's PR |
 | `review-followup.md` | A watcher sees new commits on a PR you review |
+| `issue-start.md` | Starting an agent on an issue assigned to you |
 
-Prompts are Go templates with `{{.URL}}`, `{{.Repo}}`, `{{.Number}}`, `{{.Branch}}`, `{{.Base}}`, `{{.Author}}` and `{{.HeadShort}}`. For example, to hand the work to your own subagent:
+PR prompts are Go templates with `{{.URL}}`, `{{.Repo}}`, `{{.Number}}`, `{{.Branch}}`, `{{.Base}}`, `{{.Author}}` and `{{.HeadShort}}`; the issue prompt has `{{.URL}}`, `{{.Repo}}`, `{{.Number}}`, `{{.Title}}` and `{{.Author}}`. For example, to hand the work to your own subagent:
 
 ```text
 Spawn an `orchestrator` task agent to address the review feedback on {{.URL}} (branch {{.Branch}}). Commit locally; do not push.
@@ -100,12 +101,12 @@ The defaults are in [`internal/agents/prompts`](internal/agents/prompts).
 | Key | Action |
 |---|---|
 | `↑` `↓` / `j` `k` / wheel / click | Move (`pgup` `pgdn` `home` `end` too) |
-| `enter` / click the selected row | Jump to the PR's agent, or start one. On a repo row: fold it |
-| `p` | Send a prompt to the PR's agent |
-| `x` `x` | Close the PR's agent pane (the first `x` asks) |
+| `enter` / click the selected row | Jump to the row's agent, or start one. On a repo row: fold it |
+| `p` | Send a prompt to the row's agent |
+| `x` `x` | Close the row's agent pane (the first `x` asks) |
 | `w` | Watch or unwatch the PR |
-| `o` | Open the PR in the browser |
-| `tab` / `1` / `2` | Mine / Review |
+| `o` | Open the PR or issue in the browser |
+| `tab` / `1` / `2` / `3` | Mine / Review / Issues |
 | `/` | Filter (`esc` clears) |
 | `s` | Sort: urgent → updated → waiting |
 | `g` | Group by repo on or off |
@@ -132,7 +133,7 @@ A PR is drawn as stacked when the same author's PR branch is its base. Shared br
 
 ### Agents
 
-For `owner/repo#N`, cutie uses the herdr workspace labelled `repo` (created in the repo's clone if missing), a tab labelled `fix #N` or `review #N`, and an agent named `fix-repo-N` or `rev-repo-N`. The name ties the agent to the PR, so cutie can show its state and jump back to it.
+For `owner/repo#N`, cutie uses the herdr workspace labelled `repo` (created in the repo's clone if missing), a tab labelled `fix #N`, `review #N` or `issue #N`, and an agent named `fix-repo-N`, `rev-repo-N` or `iss-repo-N`. The name ties the agent to the PR or issue, so cutie can show its state and jump back to it. The Issues tab lists open issues assigned to you; they come with the same cheap poll as the PR list.
 
 ### Watchers
 
