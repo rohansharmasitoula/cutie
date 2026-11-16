@@ -250,15 +250,19 @@ func (m *model) addEvents(evs ...Event) {
 	}
 }
 
+// repoDir finds the PR's clone: a folder named after the repo, directly in the root or
+// one folder down (e.g. ~/Development/acme/api), so clones grouped by org work as is.
 func (m model) repoDir(p github.PR) (string, error) {
 	if m.cfg.Demo {
 		return "", nil
 	}
-	dir := filepath.Join(m.cfg.Root, p.RepoName)
-	if st, err := os.Stat(dir); err != nil || !st.IsDir() {
-		return "", fmt.Errorf("no clone of %s at %s", p.Repo, dir)
+	nested, _ := filepath.Glob(filepath.Join(m.cfg.Root, "*", p.RepoName))
+	for _, dir := range append([]string{filepath.Join(m.cfg.Root, p.RepoName)}, nested...) {
+		if st, err := os.Stat(dir); err == nil && st.IsDir() {
+			return dir, nil
+		}
 	}
-	return dir, nil
+	return "", fmt.Errorf("no clone of %s in %s or one folder below it (set CUTIE_ROOT to the folder holding your clones)", p.Repo, m.cfg.Root)
 }
 
 // ---- list items ----

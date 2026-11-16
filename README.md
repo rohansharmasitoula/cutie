@@ -53,7 +53,7 @@ go build -o ~/.local/bin/cutie .
 
 ## Quick start
 
-1. Keep one clone per repo in a single folder, each named after its repo, e.g. `~/Development/api`, `~/Development/web`. Point cutie at it with `CUTIE_ROOT` if it isn't `~/Development`.
+1. Keep your clones in one folder, each named after its repo, either directly (`~/Development/api`) or one folder down (`~/Development/acme/api`). Point cutie at it with `CUTIE_ROOT` if it isn't `~/Development`.
 2. Start herdr in one terminal and `cutie` in another, or run cutie inside a herdr pane.
 3. Press `enter` on a PR marked `needs work` or `to review`.
 
@@ -67,7 +67,7 @@ CUTIE_DEMO=1 cutie
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `CUTIE_ROOT` | `~/Development` | Folder with one clone per repo, named after the repo |
+| `CUTIE_ROOT` | `~/Development` | Folder holding your clones, directly or one folder down, named after the repo |
 | `CUTIE_AGENT` | `omp` | herdr agent kind to start: `omp`, `claude`, `codex`, … |
 | `CUTIE_INTERVAL` | `60` | Seconds between GitHub refreshes (minimum 10) |
 | `CUTIE_WATCH_MINUTES` | `30` | Minutes between watcher checks |
@@ -132,7 +132,7 @@ A PR is drawn as stacked when the same author's PR branch is its base. Shared br
 
 ### Agents
 
-For `owner/repo#N`, cutie uses the herdr workspace labelled `repo` (created at `$CUTIE_ROOT/repo` if missing), a tab labelled `fix #N` or `review #N`, and an agent named `fix-repo-N` or `rev-repo-N`. The name ties the agent to the PR, so cutie can show its state and jump back to it.
+For `owner/repo#N`, cutie uses the herdr workspace labelled `repo` (created in the repo's clone if missing), a tab labelled `fix #N` or `review #N`, and an agent named `fix-repo-N` or `rev-repo-N`. The name ties the agent to the PR, so cutie can show its state and jump back to it.
 
 ### Watchers
 
