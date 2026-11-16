@@ -15,14 +15,16 @@ cutie lists your open PRs and the PRs waiting for your review, tells you which o
 
 ## Features
 
-- **Your PRs and your reviews in one place.** Two tabs, grouped by repo, with stacked PRs drawn as a tree.
-- **Knows what needs you.** A PR "needs work" when a review thread waits on your reply or a reviewer wrote after your last push. Threads you already answered don't count.
-- **One key to an agent.** `enter` finds or creates the repo's herdr workspace and a tab for the PR, starts an agent there, and sends it the PR. `enter` again jumps to it.
-- **Live agent view.** Status (working, idle, blocked, done), cost, and the agent's latest output next to the PR's checks, reviewers and unresolved threads.
-- **Watchers.** Watch a PR and cutie wakes its agent when new review feedback arrives on yours, or new commits land on one you review.
-- **Claude usage at a glance.** 5 hour and 7 day plan windows with reset countdowns, 24h spend, tokens per hour, model split. A spending guard pauses watchers when the 5 hour window runs high.
-- **Easy on GitHub's rate limit.** A 1-point poll each minute; full details only for PRs that changed.
-- **Mouse and keyboard.** Click rows, drag panel borders to resize, filter, sort, fold.
+| | |
+|---|---|
+| 📋 **One inbox for PRs** | Your open PRs and the ones waiting for your review, side by side in two tabs, grouped by repo. Stacked PRs nest under the PR they build on. |
+| 🎯 **Only what needs you** | A PR is flagged when a reviewer is waiting on your reply or commented after your last push. Threads you've already answered stay quiet. |
+| ⚡ **An agent in one keystroke** | Press `enter` on a PR: cutie opens the repo in herdr, starts a coding agent in its own tab and hands it the PR. Press it again to jump there. |
+| 👀 **See every agent at work** | Each agent's status, cost and latest output, right beside the PR's checks, reviewers and open threads. |
+| 🔔 **Watchers** | Watch a PR and its agent wakes up by itself when reviewers reply to yours, or when the author pushes to one you're reviewing. |
+| 💸 **Claude usage, always visible** | Your 5 hour and 7 day limits with reset timers, 24h spend, tokens per hour and model split. Watchers pause before you run out. |
+| 🪶 **Light on GitHub** | One tiny query a minute; full details only for PRs that changed, so your API budget lasts. |
+| 🖱️ **Mouse or keyboard** | Click rows, drag borders to resize panels, filter, sort and fold repos. |
 
 ## Requirements
 
