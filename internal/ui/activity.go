@@ -1,7 +1,9 @@
-package main
+package ui
 
 import (
 	"fmt"
+	"github.com/rohansharmasitoula/cutie/internal/github"
+	"github.com/rohansharmasitoula/cutie/internal/herdr"
 	"time"
 )
 
@@ -21,10 +23,10 @@ type Event struct {
 
 const maxEvents = 100
 
-func ref(p PR) string { return fmt.Sprintf("%s #%d", p.RepoName, p.Number) }
+func ref(p github.PR) string { return fmt.Sprintf("%s #%d", p.RepoName, p.Number) }
 
 // PREvents compares two GitHub snapshots and describes what changed.
-func PREvents(prev, next map[string]PR, now time.Time) []Event {
+func PREvents(prev, next map[string]github.PR, now time.Time) []Event {
 	var evs []Event
 	add := func(k EventKind, format string, a ...any) {
 		evs = append(evs, Event{At: now, Kind: k, Text: fmt.Sprintf(format, a...)})
@@ -51,7 +53,7 @@ func PREvents(prev, next map[string]PR, now time.Time) []Event {
 				add(EventGood, "CI passed on %s", ref(n))
 			}
 		}
-		if n.Status != o.Status && n.Status == StatusApproved {
+		if n.Status != o.Status && n.Status == github.StatusApproved {
 			add(EventGood, "%s approved", ref(n))
 		}
 	}
@@ -65,7 +67,7 @@ func PREvents(prev, next map[string]PR, now time.Time) []Event {
 
 // AgentEvents compares agent lists by pane and reports finished and blocked agents.
 // blocked holds the agents that just became blocked, for notifications.
-func AgentEvents(prev, next []Agent, now time.Time) (evs []Event, blocked []Agent) {
+func AgentEvents(prev, next []herdr.Agent, now time.Time) (evs []Event, blocked []herdr.Agent) {
 	before := make(map[string]string, len(prev))
 	for _, a := range prev {
 		before[a.PaneID] = a.Status

@@ -1,0 +1,1 @@
+New review feedback arrived on {{.URL}}. Address the new unresolved threads and comments on branch {{.Branch}} with the same rules: commit locally, draft replies, do not push or post anything to GitHub.

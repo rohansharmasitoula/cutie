@@ -1,7 +1,11 @@
-package main
+package ui
 
 import (
 	"fmt"
+	"github.com/rohansharmasitoula/cutie/internal/agents"
+	"github.com/rohansharmasitoula/cutie/internal/github"
+	"github.com/rohansharmasitoula/cutie/internal/herdr"
+	"github.com/rohansharmasitoula/cutie/internal/utils"
 	"sort"
 	"strings"
 	"time"
@@ -27,14 +31,14 @@ var (
 	bad    = lipgloss.NewStyle().Foreground(cBad)
 	sel    = lipgloss.NewStyle().Reverse(true)
 
-	statusColor = map[Status]lipgloss.Color{
-		StatusDraft:           cDim,
-		StatusInReview:        cWarn,
-		StatusNeedsWork:       cBad,
-		StatusApproved:        cGood,
-		StatusToReview:        cPurple,
-		StatusReviewedUpdated: cBad,
-		StatusReviewed:        cDim,
+	statusColor = map[github.Status]lipgloss.Color{
+		github.StatusDraft:           cDim,
+		github.StatusInReview:        cWarn,
+		github.StatusNeedsWork:       cBad,
+		github.StatusApproved:        cGood,
+		github.StatusToReview:        cPurple,
+		github.StatusReviewedUpdated: cBad,
+		github.StatusReviewed:        cDim,
 	}
 	agentColor = map[string]lipgloss.Color{
 		"working": cGood, "blocked": cBad, "idle": cWarn, "done": cCyan, "unknown": cDim,
@@ -42,76 +46,6 @@ var (
 )
 
 func fg(c lipgloss.Color, s string) string { return lipgloss.NewStyle().Foreground(c).Render(s) }
-
-// fit truncates s to w cells and pads it with spaces to exactly w cells.
-func fit(s string, w int) string {
-	if w <= 0 {
-		return ""
-	}
-	s = ansi.Truncate(s, w, "…")
-	return s + strings.Repeat(" ", max(w-ansi.StringWidth(s), 0))
-}
-
-// spread puts left and right on one w-cell line, truncating left to make room.
-func spread(left, right string, w int) string {
-	rw := ansi.StringWidth(right)
-	if rw >= w {
-		return fit(right, w)
-	}
-	return fit(left, w-rw-1) + " " + right
-}
-
-func ago(t time.Time) string {
-	if t.IsZero() {
-		return ""
-	}
-	return dur(time.Since(t))
-}
-
-func dur(d time.Duration) string {
-	switch {
-	case d < time.Minute:
-		return "now"
-	case d < time.Hour:
-		return fmt.Sprintf("%dm", int(d.Minutes()))
-	case d < 24*time.Hour:
-		return fmt.Sprintf("%dh", int(d.Hours()))
-	}
-	return fmt.Sprintf("%dd", int(d.Hours()/24))
-}
-
-func until(t time.Time) string {
-	d := time.Until(t)
-	if d <= 0 {
-		return "now"
-	}
-	if d < 24*time.Hour {
-		return fmt.Sprintf("%dh%02d", int(d.Hours()), int(d.Minutes())%60)
-	}
-	return fmt.Sprintf("%dd%dh", int(d.Hours()/24), int(d.Hours())%24)
-}
-
-func money(v float64) string {
-	if v < 0 {
-		return ""
-	}
-	if v >= 100 {
-		return fmt.Sprintf("$%.0f", v)
-	}
-	return fmt.Sprintf("$%.2f", v)
-}
-
-func tokens(n int64) string {
-	switch {
-	case n >= 1e9:
-		return fmt.Sprintf("%.1fB", float64(n)/1e9)
-	case n >= 1e6:
-		return fmt.Sprintf("%.0fM", float64(n)/1e6)
-	case n >= 1e3:
-		return fmt.Sprintf("%.0fK", float64(n)/1e3)
-	}
-	return fmt.Sprint(n)
-}
 
 func usageColor(frac float64) lipgloss.Color {
 	switch {
@@ -167,7 +101,7 @@ func panel(title string, body []string, w, h int, focused bool) string {
 		if i < len(body) {
 			l = body[i]
 		}
-		lines = append(lines, b.Render("│")+fit(l, inner)+b.Render("│"))
+		lines = append(lines, b.Render("│")+utils.Fit(l, inner)+b.Render("│"))
 	}
 	lines = append(lines, b.Render("╰"+strings.Repeat("─", inner)+"╯"))
 	return strings.Join(lines, "\n")
@@ -180,8 +114,6 @@ const (
 	footerH = 2
 )
 
-func clamp(v, lo, hi int) int { return max(lo, min(v, max(lo, hi))) }
-
 func (m model) activityH() int {
 	h := 4
 	if m.height >= 34 {
@@ -190,7 +122,7 @@ func (m model) activityH() int {
 	if m.sizes.Activity > 0 {
 		h = m.sizes.Activity
 	}
-	return clamp(h, 3, m.height-headerH-footerH-8)
+	return utils.Clamp(h, 3, m.height-headerH-footerH-8)
 }
 
 func (m model) mainH() int { return max(m.height-headerH-footerH-m.activityH(), 6) }
@@ -201,19 +133,19 @@ func (m model) leftW() int {
 	if !m.wide() {
 		return m.width
 	}
-	return clamp(int(float64(m.width)*m.sizes.List), 40, m.width-40)
+	return utils.Clamp(int(float64(m.width)*m.sizes.List), 40, m.width-40)
 }
 
 func (m model) rightW() int { return m.width - m.leftW() }
 
 // detailH is the height of the detail panel; the agents and Claude panels get the rest.
 func (m model) detailH() int {
-	return clamp(int(float64(m.mainH())*m.sizes.Detail), 4, m.mainH()-4)
+	return utils.Clamp(int(float64(m.mainH())*m.sizes.Detail), 4, m.mainH()-4)
 }
 
 // agentsW is the width of the agents panel; the Claude panel gets the rest.
 func (m model) agentsW() int {
-	return clamp(int(float64(m.rightW())*m.sizes.Agents), 14, m.rightW()-14)
+	return utils.Clamp(int(float64(m.rightW())*m.sizes.Agents), 14, m.rightW()-14)
 }
 
 // border is a draggable edge between panels.
@@ -257,7 +189,7 @@ func (m *model) dragTo(x, y int) {
 	case borderAgents:
 		m.sizes.Agents = frac(x-m.leftW(), m.rightW())
 	case borderActivity:
-		m.sizes.Activity = clamp(m.height-footerH-y, 3, m.height-headerH-footerH-8)
+		m.sizes.Activity = utils.Clamp(m.height-footerH-y, 3, m.height-headerH-footerH-8)
 	}
 }
 
@@ -325,13 +257,13 @@ func (m model) headerBar() string {
 	}
 	if m.rate.Limit > 0 {
 		used := 1 - float64(m.rate.Remaining)/float64(m.rate.Limit)
-		parts = append(parts, "gh "+fg(usageColor(used), fmt.Sprintf("%d left", m.rate.Remaining))+dim.Render(" ↺"+until(m.rate.ResetAt)))
+		parts = append(parts, "gh "+fg(usageColor(used), fmt.Sprintf("%d left", m.rate.Remaining))+dim.Render(" ↺"+utils.Until(m.rate.ResetAt)))
 	}
 	for _, l := range m.limits {
-		parts = append(parts, fmt.Sprintf("%s %s %s %s", l.Window, bar(l.Used, 10), fg(usageColor(l.Used), fmt.Sprintf("%.0f%%", l.Used*100)), dim.Render("↺"+until(l.ResetsAt))))
+		parts = append(parts, fmt.Sprintf("%s %s %s %s", l.Window, bar(l.Used, 10), fg(usageColor(l.Used), fmt.Sprintf("%.0f%%", l.Used*100)), dim.Render("↺"+utils.Until(l.ResetsAt))))
 	}
 	if m.stats != nil {
-		parts = append(parts, "24h "+bold.Render(money(m.stats.Cost)))
+		parts = append(parts, "24h "+bold.Render(utils.Money(m.stats.Cost)))
 	}
 	counts := map[string]int{}
 	for _, a := range m.agents {
@@ -348,9 +280,9 @@ func (m model) headerBar() string {
 	}
 	right := dim.Render("⟳ refreshing")
 	if !m.loading && !m.refreshed.IsZero() {
-		right = dim.Render("⟳ " + ago(m.refreshed))
+		right = dim.Render("⟳ " + utils.Ago(m.refreshed))
 	}
-	return spread(" "+strings.Join(parts, dim.Render("  │  ")), right+" ", m.width)
+	return utils.Spread(" "+strings.Join(parts, dim.Render("  │  ")), right+" ", m.width)
 }
 
 func (m model) footer() string {
@@ -361,7 +293,7 @@ func (m model) footer() string {
 	case inputPrompt:
 		name := ""
 		if p := m.selectedPR(); p != nil {
-			name = AgentName(*p)
+			name = agents.Name(*p)
 		}
 		line1 = accent.Render(" → "+name+" ") + m.input.View() + dim.Render("   enter send · esc cancel")
 	default:
@@ -372,7 +304,7 @@ func (m model) footer() string {
 		}
 	}
 	keys := " enter agent · w watch · p prompt · x close agent · o open · tab mine/review · / filter · s sort · g group · b bots · d drafts · space fold · R force · drag borders to resize · = reset · ? help · q quit"
-	return fit(line1, m.width) + "\n" + dim.Render(fit(keys, m.width))
+	return utils.Fit(line1, m.width) + "\n" + dim.Render(utils.Fit(keys, m.width))
 }
 
 // ---- list ----
@@ -396,7 +328,7 @@ func (m model) listBody(w int) []string {
 		}
 		return dim.Render(s)
 	}
-	countNeed := func(prs []PR) int {
+	countNeed := func(prs []github.PR) int {
 		n := 0
 		for _, p := range prs {
 			if p.Status.Actionable() && !(m.hideBots && p.IsBot) {
@@ -416,7 +348,7 @@ func (m model) listBody(w int) []string {
 	if h := m.hiddenCount(); h > 0 {
 		notes = append(notes, dim.Render(fmt.Sprintf("%d hidden", h)))
 	}
-	lines := []string{spread(tabs, strings.Join(notes, dim.Render(" · ")), w)}
+	lines := []string{utils.Spread(tabs, strings.Join(notes, dim.Render(" · ")), w)}
 
 	its := m.items()
 	if len(its) == 0 {
@@ -441,7 +373,7 @@ func (m model) renderItem(it item, selected bool, w int) string {
 		}
 		line := accent.Render(arrow+" "+it.repo) + dim.Render(fmt.Sprintf("  %d", it.count))
 		if selected {
-			return sel.Render(fit(ansi.Strip(line), w))
+			return sel.Render(utils.Fit(ansi.Strip(line), w))
 		}
 		return line
 	}
@@ -454,7 +386,7 @@ func (m model) renderItem(it item, selected bool, w int) string {
 	if ci == "" {
 		ci = " "
 	}
-	badge := fit(fg(statusColor[p.Status], p.Status.Label()), 11)
+	badge := utils.Fit(fg(statusColor[p.Status], p.Status.Label()), 11)
 	ref := fmt.Sprintf("#%d", p.Number)
 	if !m.grouped {
 		ref = p.RepoName + " " + ref
@@ -465,9 +397,9 @@ func (m model) renderItem(it item, selected bool, w int) string {
 	}
 
 	var right []string
-	if a, ok := m.byName[AgentName(p)]; ok {
+	if _, a, ok := m.agentFor(p); ok {
 		cell := "● " + a.Status
-		if c := money(a.Cost); c != "" {
+		if c := utils.Money(a.Cost); c != "" {
 			cell += " " + c
 		}
 		right = append(right, fg(agentColor[a.Status], cell))
@@ -483,12 +415,12 @@ func (m model) renderItem(it item, selected bool, w int) string {
 	if !p.Mine {
 		right = append(right, dim.Render("@"+p.Author))
 	}
-	if wait := ago(p.LastCommit); wait != "" {
+	if wait := utils.Ago(p.LastCommit); wait != "" {
 		right = append(right, fg(waitColor(time.Since(p.LastCommit)), wait))
 	}
 
 	left := fmt.Sprintf(" %s %s %s %s%s %s", watch, badge, ci, indent, bold.Render(ref), p.Title)
-	line := spread(left, strings.Join(right, "  "), w)
+	line := utils.Spread(left, strings.Join(right, "  "), w)
 	if selected {
 		return sel.Render(ansi.Strip(line))
 	}
@@ -524,14 +456,14 @@ func (m model) detail(w int) (string, []string) {
 	add := func(s ...string) { l = append(l, s...) }
 
 	add(bold.Render(p.Title))
-	meta := fmt.Sprintf("%s → %s · @%s · updated %s ago", p.Branch, p.Base, p.Author, ago(p.UpdatedAt))
+	meta := fmt.Sprintf("%s → %s · @%s · updated %s ago", p.Branch, p.Base, p.Author, utils.Ago(p.UpdatedAt))
 	add(dim.Render(meta))
 	state := fg(statusColor[p.Status], p.Status.Label())
 	if p.Decision != "" {
 		state += dim.Render(" · " + strings.ToLower(strings.ReplaceAll(p.Decision, "_", " ")))
 	}
 	if !p.LastCommit.IsZero() {
-		state += dim.Render(" · last push " + ago(p.LastCommit) + " ago")
+		state += dim.Render(" · last push " + utils.Ago(p.LastCommit) + " ago")
 	}
 	if _, ok := m.watches[p.Key()]; ok {
 		state += fg(cCyan, " · ◉ watching")
@@ -543,12 +475,12 @@ func (m model) detail(w int) (string, []string) {
 	var failed []string
 	for _, c := range p.Checks {
 		switch c.State {
-		case CheckPass:
+		case github.CheckPass:
 			pass++
-		case CheckFail:
+		case github.CheckFail:
 			fail++
 			failed = append(failed, c.Name)
-		case CheckPending:
+		case github.CheckPending:
 			pend++
 		}
 	}
@@ -577,11 +509,11 @@ func (m model) detail(w int) (string, []string) {
 	}
 
 	// Agent
-	name := AgentName(p)
+	name, a, ok := m.agentFor(p)
 	add("")
-	if a, ok := m.byName[name]; ok {
+	if ok {
 		head := bold.Render("Agent ") + name + " " + fg(agentColor[a.Status], "● "+a.Status)
-		if c := money(a.Cost); c != "" {
+		if c := utils.Money(a.Cost); c != "" {
 			head += dim.Render(" · ") + c
 		}
 		add(head)
@@ -625,25 +557,25 @@ func (m model) detail(w int) (string, []string) {
 }
 
 func (m model) repoSummary(repo string) []string {
-	counts := map[Status]int{}
+	counts := map[github.Status]int{}
 	var cost float64
 	for _, p := range m.visiblePRs() {
 		if p.RepoName != repo {
 			continue
 		}
 		counts[p.Status]++
-		if a, ok := m.byName[AgentName(p)]; ok && a.Cost > 0 {
+		if _, a, ok := m.agentFor(p); ok && a.Cost > 0 {
 			cost += a.Cost
 		}
 	}
 	var l []string
-	for _, s := range []Status{StatusNeedsWork, StatusReviewedUpdated, StatusToReview, StatusInReview, StatusApproved, StatusReviewed, StatusDraft} {
+	for _, s := range []github.Status{github.StatusNeedsWork, github.StatusReviewedUpdated, github.StatusToReview, github.StatusInReview, github.StatusApproved, github.StatusReviewed, github.StatusDraft} {
 		if counts[s] > 0 {
-			l = append(l, fmt.Sprintf("%s %d", fit(fg(statusColor[s], s.Label()), 12), counts[s]))
+			l = append(l, fmt.Sprintf("%s %d", utils.Fit(fg(statusColor[s], s.Label()), 12), counts[s]))
 		}
 	}
 	if cost > 0 {
-		l = append(l, "", "agents on this repo's PRs: "+money(cost))
+		l = append(l, "", "agents on this repo's PRs: "+utils.Money(cost))
 	}
 	return append(l, "", dim.Render("space folds the group"))
 }
@@ -671,7 +603,7 @@ func helpLines() []string {
 	}
 	var l []string
 	for _, r := range rows {
-		l = append(l, accent.Render(fit(r[0], 15))+r[1])
+		l = append(l, accent.Render(utils.Fit(r[0], 15))+r[1])
 	}
 	return append(l, "", dim.Render("Watchers pause when the 5h Claude window passes CUTIE_GUARD (default 85%)."))
 }
@@ -684,7 +616,7 @@ func (m model) agentsTitle() string {
 
 func (m model) agentsBody(w int) []string {
 	rank := map[string]int{"blocked": 0, "working": 1, "idle": 2, "done": 3}
-	as := append([]Agent(nil), m.agents...)
+	as := append([]herdr.Agent(nil), m.agents...)
 	sort.SliceStable(as, func(i, j int) bool {
 		ri, ok := rank[as[i].Status]
 		if !ok {
@@ -709,36 +641,39 @@ func (m model) agentsBody(w int) []string {
 		if a.Name == "" {
 			label = dim.Render(label)
 		}
-		l = append(l, spread(fg(agentColor[a.Status], "●")+" "+label, dim.Render(money(a.Cost)), w))
+		l = append(l, utils.Spread(fg(agentColor[a.Status], "●")+" "+label, dim.Render(utils.Money(a.Cost)), w))
 	}
-	return append([]string{spread(dim.Render("blocked first"), dim.Render("total "+money(total)), w)}, l...)
+	return append([]string{utils.Spread(dim.Render("blocked first"), dim.Render("total "+utils.Money(total)), w)}, l...)
 }
 
 func (m model) tokensBody(w int) []string {
+	if !m.cfg.HasOmp {
+		return []string{dim.Render("Claude usage and agent costs come from omp,"), dim.Render("which is not installed.")}
+	}
 	var l []string
 	bw := max(w-20, 6)
 	for _, lim := range m.limits {
-		l = append(l, fmt.Sprintf("%-3s%s %s %s", lim.Window, bar(lim.Used, bw), fg(usageColor(lim.Used), fmt.Sprintf("%3.0f%%", lim.Used*100)), dim.Render("↺"+until(lim.ResetsAt))))
+		l = append(l, fmt.Sprintf("%-3s%s %s %s", lim.Window, bar(lim.Used, bw), fg(usageColor(lim.Used), fmt.Sprintf("%3.0f%%", lim.Used*100)), dim.Render("↺"+utils.Until(lim.ResetsAt))))
 	}
 	if len(m.limits) == 0 {
 		l = append(l, dim.Render("plan limits loading…"))
 	}
 	if m.paused {
-		l = append(l, bad.Render(fmt.Sprintf("⏸ watchers paused (5h ≥ %.0f%%)", m.cfg.guard*100)))
+		l = append(l, bad.Render(fmt.Sprintf("⏸ watchers paused (5h ≥ %.0f%%)", m.cfg.Guard*100)))
 	} else {
 		next := "next check soon"
 		if !m.watchedAt.IsZero() {
-			next = "next check in " + dur(time.Until(m.watchedAt.Add(m.cfg.watchGap)))
+			next = "next check in " + utils.Duration(time.Until(m.watchedAt.Add(m.cfg.WatchGap)))
 		}
-		l = append(l, dim.Render(fmt.Sprintf("watchers: %s · pause at 5h ≥ %.0f%%", next, m.cfg.guard*100)))
+		l = append(l, dim.Render(fmt.Sprintf("watchers: %s · pause at 5h ≥ %.0f%%", next, m.cfg.Guard*100)))
 	}
 	s := m.stats
 	if s == nil {
 		return append(l, "", dim.Render("omp stats loading…"))
 	}
-	l = append(l, "", bold.Render(money(s.Cost))+dim.Render(" · "+tokens(s.Tokens)+" tokens"))
+	l = append(l, "", bold.Render(utils.Money(s.Cost))+dim.Render(" · "+utils.Tokens(s.Tokens)+" tokens"))
 	l = append(l, sparkline(s.HourlyTokens, w))
-	l = append(l, spread(dim.Render("-24h"), dim.Render("now"), min(w, len(s.HourlyTokens))))
+	l = append(l, utils.Spread(dim.Render("-24h"), dim.Render("now"), min(w, len(s.HourlyTokens))))
 	if s.Cost > 0 {
 		var ms []string
 		for _, sh := range s.Models {
@@ -752,7 +687,7 @@ func (m model) tokensBody(w int) []string {
 		if i == 3 {
 			break
 		}
-		l = append(l, spread(dim.Render(f.Name), money(f.Cost), w))
+		l = append(l, utils.Spread(dim.Render(f.Name), utils.Money(f.Cost), w))
 	}
 	return l
 }
@@ -772,7 +707,7 @@ func (m model) activityBody(w int) []string {
 		case EventBad:
 			c = cBad
 		}
-		l = append(l, dim.Render(fit(ago(e.At), 4))+fg(c, e.Text))
+		l = append(l, dim.Render(utils.Fit(utils.Ago(e.At), 4))+fg(c, e.Text))
 	}
 	return l
 }

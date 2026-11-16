@@ -1,9 +1,10 @@
-package main
+// Package github loads your open PRs and the PRs you review through the gh CLI.
+package github
 
 import (
 	"encoding/json"
 	"fmt"
-	"os/exec"
+	"github.com/rohansharmasitoula/cutie/internal/utils"
 	"strings"
 	"time"
 )
@@ -46,8 +47,8 @@ func (s Status) Actionable() bool {
 	return s == StatusNeedsWork || s == StatusToReview || s == StatusReviewedUpdated
 }
 
-// urgency orders statuses for the "urgent" sort: lower comes first.
-func (s Status) urgency() int {
+// Urgency orders statuses for the "urgent" sort: lower comes first.
+func (s Status) Urgency() int {
 	switch s {
 	case StatusNeedsWork, StatusReviewedUpdated:
 		return 0
@@ -280,29 +281,20 @@ type gqlError struct {
 
 // graphql runs a query through the gh CLI (its auth) and decodes `.data` into out.
 func graphql(out any, query string, args ...string) error {
-	cmdArgs := append([]string{"api", "graphql", "-f", "query=" + query}, args...)
-	stdout, err := exec.Command("gh", cmdArgs...).Output()
-	if err != nil {
-		if ee, ok := err.(*exec.ExitError); ok {
-			msg := strings.TrimSpace(string(ee.Stderr))
-			// gh prints the response body on stdout for GraphQL errors.
-			var body struct{ Errors []gqlError }
-			if json.Unmarshal(stdout, &body) == nil && len(body.Errors) > 0 {
-				msg = body.Errors[0].Message
-			}
-			return fmt.Errorf("GitHub: %s", strings.TrimPrefix(msg, "gh: "))
-		}
-		return fmt.Errorf("gh api graphql: %w", err)
-	}
+	stdout, err := utils.Run("gh", append([]string{"api", "graphql", "-f", "query=" + query}, args...)...)
 	var resp struct {
 		Data   json.RawMessage `json:"data"`
 		Errors []gqlError      `json:"errors"`
 	}
-	if err := json.Unmarshal(stdout, &resp); err != nil {
-		return fmt.Errorf("decoding GitHub response: %w", err)
-	}
-	if len(resp.Errors) > 0 {
+	// gh prints the response body on stdout even when the query fails.
+	if json.Unmarshal(stdout, &resp) == nil && len(resp.Errors) > 0 {
 		return fmt.Errorf("GitHub: %s", resp.Errors[0].Message)
+	}
+	if err != nil {
+		return err
+	}
+	if resp.Data == nil {
+		return fmt.Errorf("GitHub: response without data")
 	}
 	return json.Unmarshal(resp.Data, out)
 }
@@ -310,10 +302,6 @@ func graphql(out any, query string, args ...string) error {
 // FetchRateLimit reads the GraphQL budget over REST, which does not spend GraphQL points
 // and still answers when the GraphQL budget is exhausted.
 func FetchRateLimit() (RateLimit, error) {
-	out, err := exec.Command("gh", "api", "rate_limit").Output()
-	if err != nil {
-		return RateLimit{}, fmt.Errorf("gh api rate_limit: %w", err)
-	}
 	var resp struct {
 		Resources struct {
 			GraphQL struct {
@@ -323,8 +311,8 @@ func FetchRateLimit() (RateLimit, error) {
 			} `json:"graphql"`
 		} `json:"resources"`
 	}
-	if err := json.Unmarshal(out, &resp); err != nil {
-		return RateLimit{}, fmt.Errorf("gh api rate_limit: decoding: %w", err)
+	if err := utils.RunJSON(&resp, "gh", "api", "rate_limit"); err != nil {
+		return RateLimit{}, err
 	}
 	g := resp.Resources.GraphQL
 	return RateLimit{Remaining: g.Remaining, Limit: g.Limit, ResetAt: time.Unix(g.Reset, 0)}, nil

@@ -1,11 +1,11 @@
-package main
+// Package herdr drives the herdr CLI: workspaces, panes, agents and notifications.
+package herdr
 
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/rohansharmasitoula/cutie/internal/utils"
 	"os"
-	"os/exec"
-	"regexp"
 	"strings"
 	"time"
 )
@@ -54,34 +54,29 @@ type herdrError struct {
 
 // herdr runs a herdr CLI command and decodes its `.result` into out (if non-nil).
 func herdr(out any, args ...string) error {
-	cmd := exec.Command("herdr", args...)
-	stdout, err := cmd.Output()
-	if err != nil {
-		msg := err.Error()
-		if ee, ok := err.(*exec.ExitError); ok {
-			var he herdrError
-			if json.Unmarshal(ee.Stderr, &he) == nil && he.Error.Message != "" {
-				msg = he.Error.Code + ": " + he.Error.Message
-			} else if s := strings.TrimSpace(string(ee.Stderr)); s != "" {
-				msg = s
-			}
+	stdout, err := utils.Run("herdr", args...)
+	if ce, ok := utils.AsCmdError(err); ok {
+		var he herdrError
+		if json.Unmarshal(ce.Stderr, &he) == nil && he.Error.Message != "" {
+			return fmt.Errorf("herdr %s: %s: %s", args[0], he.Error.Code, he.Error.Message)
 		}
-		return fmt.Errorf("herdr %s: %s", args[0]+" "+args[1], msg)
+		return err
 	}
-	if out == nil {
-		return nil
+	if err != nil || out == nil {
+		return err
 	}
 	var env struct {
 		Result json.RawMessage `json:"result"`
 	}
 	if err := json.Unmarshal(stdout, &env); err != nil {
-		return fmt.Errorf("herdr %s: decoding: %w", args[0]+" "+args[1], err)
+		return utils.Wrap("herdr "+args[0]+": decoding", err)
 	}
 	return json.Unmarshal(env.Result, out)
 }
 
-// ListAgents returns every live agent herdr recognizes, with session costs from meter.
-func ListAgents(meter *CostMeter) ([]Agent, error) {
+// ListAgents returns every live agent herdr recognizes, except the caller's own pane.
+// Cost is left at -1 (unknown) for the caller to fill.
+func ListAgents() ([]Agent, error) {
 	var res struct {
 		Agents []Agent `json:"agents"`
 	}
@@ -98,11 +93,6 @@ func ListAgents(meter *CostMeter) ([]Agent, error) {
 	res.Agents = agents
 	for i := range res.Agents {
 		res.Agents[i].Cost = -1
-		if p := res.Agents[i].SessionPath(); p != "" {
-			if c, err := meter.SessionCost(p); err == nil {
-				res.Agents[i].Cost = c
-			}
-		}
 	}
 	return res.Agents, nil
 }
@@ -111,9 +101,9 @@ func ListAgents(meter *CostMeter) ([]Agent, error) {
 // agent UI's rules, prompt and status bar.
 func AgentTail(name string, n int) ([]string, error) {
 	// `agent read` prints the pane text itself, not JSON.
-	out, err := exec.Command("herdr", "agent", "read", name, "--source", "recent-unwrapped", "--lines", "80").Output()
+	out, err := utils.Run("herdr", "agent", "read", name, "--source", "recent-unwrapped", "--lines", "80")
 	if err != nil {
-		return nil, fmt.Errorf("herdr agent read %s: %w", name, err)
+		return nil, err
 	}
 	var keep []string
 	for _, l := range strings.Split(string(out), "\n") {
@@ -143,31 +133,6 @@ func Notify(title, body string) error {
 	return herdr(nil, "notification", "show", title, "--body", body, "--sound", "request")
 }
 
-var nameInvalid = regexp.MustCompile(`[^a-z0-9-]+`)
-
-// AgentName is the herdr agent name that ties a pane to a PR, e.g. "fix-my-service-42".
-// herdr names must match [a-z][a-z0-9_-]{0,31}, so the repo part is trimmed to fit.
-func AgentName(p PR) string {
-	prefix := "rev"
-	if p.Mine {
-		prefix = "fix"
-	}
-	num := fmt.Sprintf("%d", p.Number)
-	repo := strings.Trim(nameInvalid.ReplaceAllString(strings.ToLower(p.RepoName), "-"), "-")
-	if room := 32 - len(prefix) - len(num) - 2; len(repo) > room {
-		repo = strings.TrimRight(repo[:room], "-")
-	}
-	return prefix + "-" + repo + "-" + num
-}
-
-// TabLabel is the herdr tab label used for a PR inside its repo workspace.
-func TabLabel(p PR) string {
-	if p.Mine {
-		return fmt.Sprintf("fix #%d", p.Number)
-	}
-	return fmt.Sprintf("review #%d", p.Number)
-}
-
 type workspace struct {
 	ID    string `json:"workspace_id"`
 	Label string `json:"label"`
@@ -190,9 +155,9 @@ type created struct {
 	RootPane  pane      `json:"root_pane"`
 }
 
-// FreePane finds or creates a shell pane for the PR: workspace labelled with the repo
-// name (rooted at dir), tab labelled TabLabel(p), first pane in that tab with no agent.
-func FreePane(p PR, dir string) (string, error) {
+// FreePane finds or creates a shell pane: the workspace labelled wsLabel (created at
+// dir), the tab labelled tabLabel in it, and the first pane in that tab with no agent.
+func FreePane(wsLabel, tabLabel, dir string) (string, error) {
 	var wsList struct {
 		Workspaces []workspace `json:"workspaces"`
 	}
@@ -201,15 +166,15 @@ func FreePane(p PR, dir string) (string, error) {
 	}
 	wsID := ""
 	for _, w := range wsList.Workspaces {
-		if w.Label == p.RepoName {
+		if w.Label == wsLabel {
 			wsID = w.ID
 			break
 		}
 	}
-	label := TabLabel(p)
+	label := tabLabel
 	if wsID == "" {
 		var c created
-		if err := herdr(&c, "workspace", "create", "--cwd", dir, "--label", p.RepoName, "--no-focus"); err != nil {
+		if err := herdr(&c, "workspace", "create", "--cwd", dir, "--label", wsLabel, "--no-focus"); err != nil {
 			return "", err
 		}
 		if err := herdr(nil, "tab", "rename", c.Tab.ID, label); err != nil {
@@ -247,12 +212,12 @@ func FreePane(p PR, dir string) (string, error) {
 	return c.RootPane.ID, nil
 }
 
-// StartAgent starts a named omp agent in a shell pane and submits the prompt.
+// StartAgent starts a named agent of the given herdr kind (omp, claude, codex, …) in a shell pane and submits the prompt.
 // A just-created pane may still be starting its shell, so the start is retried briefly.
-func StartAgent(name, paneID, prompt string) error {
+func StartAgent(name, kind, paneID, prompt string) error {
 	var err error
 	for range 5 {
-		if err = herdr(nil, "agent", "start", name, "--kind", "omp", "--pane", paneID, "--timeout", "60000"); err == nil {
+		if err = herdr(nil, "agent", "start", name, "--kind", kind, "--pane", paneID, "--timeout", "60000"); err == nil {
 			break
 		}
 		time.Sleep(time.Second)

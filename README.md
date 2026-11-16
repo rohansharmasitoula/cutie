@@ -1,84 +1,170 @@
 # cutie
 
-A terminal control center for your GitHub PRs, the omp agents working on them, and your Claude usage. From any PR it starts an omp agent in a herdr pane, shows what that agent is doing and what it has cost, and can watch PRs to wake agents on new activity.
+**A terminal dashboard for your pull requests and the AI coding agents working on them.**
 
-## Run
+cutie lists your open PRs and the PRs waiting for your review, tells you which ones need you, and with one key starts a coding agent on a PR in its own [herdr](https://herdr.dev) pane. It then shows what each agent is doing and what it has cost, and can watch PRs to wake the agent when reviewers reply or authors push.
+
+![cutie demo](docs/demo.gif)
+
+## Features
+
+- **Your PRs and your reviews in one place.** Two tabs, grouped by repo, with stacked PRs drawn as a tree.
+- **Knows what needs you.** A PR "needs work" when a review thread waits on your reply or a reviewer wrote after your last push. Threads you already answered don't count.
+- **One key to an agent.** `enter` finds or creates the repo's herdr workspace and a tab for the PR, starts an agent there, and sends it the PR. `enter` again jumps to it.
+- **Live agent view.** Status (working, idle, blocked, done), cost, and the agent's latest output next to the PR's checks, reviewers and unresolved threads.
+- **Watchers.** Watch a PR and cutie wakes its agent when new review feedback arrives on yours, or new commits land on one you review.
+- **Claude usage at a glance.** 5 hour and 7 day plan windows with reset countdowns, 24h spend, tokens per hour, model split. A spending guard pauses watchers when the 5 hour window runs high.
+- **Easy on GitHub's rate limit.** A 1-point poll each minute; full details only for PRs that changed.
+- **Mouse and keyboard.** Click rows, drag panel borders to resize, filter, sort, fold.
+
+## Requirements
+
+| Tool | Why | Required |
+|---|---|---|
+| [`gh`](https://cli.github.com), logged in | Reads your PRs | ✅ |
+| [herdr](https://herdr.dev), server running | Workspaces, panes and agents | ✅ |
+| A coding agent herdr supports (`omp`, `claude`, `codex`, …) | Works on the PRs | ✅ |
+| [`omp`](https://github.com/can1357/oh-my-pi) | Claude usage panel and agent costs | Optional |
+
+macOS and Linux. Go 1.24+ to build.
+
+## Install
 
 ```sh
-go install github.com/rohansharmasitoula/cutie@latest   # installs into $(go env GOPATH)/bin
-cutie                                                   # from any folder
+go install github.com/rohansharmasitoula/cutie@latest
 ```
 
-From a clone: `go build -o ~/.local/bin/cutie .` (also how to rebuild after changes).
+Or from a clone:
 
-Run it in a herdr pane, or in its own terminal window next to one running `herdr`.
+```sh
+git clone https://github.com/rohansharmasitoula/cutie
+cd cutie
+go build -o ~/.local/bin/cutie .
+```
 
-Needs `gh` (logged in), `omp` and a running herdr server.
+## Quick start
 
-| Env | Default | Meaning |
+1. Keep one clone per repo in a single folder, each named after its repo, e.g. `~/Development/api`, `~/Development/web`. Point cutie at it with `CUTIE_ROOT` if it isn't `~/Development`.
+2. Start herdr in one terminal and `cutie` in another, or run cutie inside a herdr pane.
+3. Press `enter` on a PR marked `needs work` or `to review`.
+
+Try it without GitHub or herdr, on made-up data:
+
+```sh
+CUTIE_DEMO=1 cutie
+```
+
+## Configuration
+
+| Variable | Default | Meaning |
 |---|---|---|
-| `CUTIE_ROOT` | `~/Development` | Folder holding one clone per repo, named after the repo |
-| `CUTIE_INTERVAL` | `60` | GitHub refresh, in seconds (minimum 10) |
+| `CUTIE_ROOT` | `~/Development` | Folder with one clone per repo, named after the repo |
+| `CUTIE_AGENT` | `omp` | herdr agent kind to start: `omp`, `claude`, `codex`, … |
+| `CUTIE_INTERVAL` | `60` | Seconds between GitHub refreshes (minimum 10) |
+| `CUTIE_WATCH_MINUTES` | `30` | Minutes between watcher checks |
 | `CUTIE_GUARD` | `85` | Pause watchers when the Claude 5 hour window passes this percentage |
-| `CUTIE_WATCH_MINUTES` | `30` | Minutes between watcher checks (the list itself still refreshes every `CUTIE_INTERVAL`) |
+| `CUTIE_DEMO` | unset | `1` shows made-up data and calls nothing |
 
-## Layout
+### Prompts
 
-| Pane | Shows |
+cutie sends an agent one of four messages. The built-in ones work with any agent: they ask it to read the PR with `gh`, fix or review it, commit locally, and **never push or post to GitHub**.
+
+To use your own, put a file with the same name in `~/Library/Application Support/cutie/prompts/` (macOS) or `~/.config/cutie/prompts/` (Linux):
+
+| File | Sent when |
 |---|---|
-| Header | Claude 5 hour and 7 day windows with reset countdowns, 24h spend, working and blocked agents |
-| PRs (left) | Tabs **Mine** and **Review**, grouped by repo; stacked PRs indented under their parent |
-| Detail (top right) | Selected PR: branch, status, checks (failing ones named), reviewers, unresolved threads with file:line and the comment, and its agent with cost and live output |
-| Agents | Every agent herdr sees, blocked first, with session cost (subagents included) |
-| Claude · 24h | Plan windows, spend and tokens, hourly token sparkline, model split, costliest folders |
-| Activity | New feedback, pushes, CI changes, approvals, merges, agents finishing or waiting for you, watchers firing |
+| `fix-start.md` | Starting an agent on your PR |
+| `fix-followup.md` | A watcher sees new review feedback on your PR |
+| `review-start.md` | Starting an agent on someone else's PR |
+| `review-followup.md` | A watcher sees new commits on a PR you review |
 
-Data sources: GitHub GraphQL through `gh` (a 1-point list poll each refresh; full details only for PRs whose `updatedAt` moved or whose CI is still running; polling pauses below 300 points left until the hourly reset, shown as `gh N left` in the header), `herdr agent list`/`agent read`, `omp usage --json` (plan windows, every minute), `omp stats --json` (24h, every 5 minutes), and the agents' omp session files for per-agent cost.
+Prompts are Go templates with `{{.URL}}`, `{{.Repo}}`, `{{.Number}}`, `{{.Branch}}`, `{{.Base}}`, `{{.Author}}` and `{{.HeadShort}}`. For example, to hand the work to your own subagent:
 
-## PR status
+```text
+Spawn an `orchestrator` task agent to address the review feedback on {{.URL}} (branch {{.Branch}}). Commit locally; do not push.
+```
 
-**Mine**: `needs work` (an unresolved thread where you were not the last to reply, or human feedback newer than your last push; threads you replied to show as `N replied` and wait on the reviewer), `approved`, `in review`, `draft`.
-**Review** (`review-requested:@me` plus open PRs you reviewed): `to review`, `new commits` (head moved since your review), `reviewed`.
-
-Row columns: watch `◉`, status, CI, number and title, agent state and cost, open threads, author (review tab), time since the last push (yellow after 1 day, red after 3).
-
-A PR is shown as stacked when the same author's PR branch is its base; shared branches (`main`, `staging`, `development`, …) never count.
+The defaults are in [`internal/agents/prompts`](internal/agents/prompts).
 
 ## Keys
 
 | Key | Action |
 |---|---|
 | `↑` `↓` / `j` `k` / wheel / click | Move (`pgup` `pgdn` `home` `end` too) |
-| `enter` / click the selected row | PR: jump to its agent, or start one (`needs work`, `to review`, `new commits`). Repo: fold it |
-| `p` | Type a prompt for the selected PR's agent |
-| `x` `x` | Close the selected PR's agent pane, ending its omp session. The first `x` asks (and warns if the agent is working); any other key keeps it |
+| `enter` / click the selected row | Jump to the PR's agent, or start one. On a repo row: fold it |
+| `p` | Send a prompt to the PR's agent |
+| `x` `x` | Close the PR's agent pane (the first `x` asks) |
 | `w` | Watch or unwatch the PR |
 | `o` | Open the PR in the browser |
 | `tab` / `1` / `2` | Mine / Review |
-| `/` | Filter by text (`esc` clears) |
+| `/` | Filter (`esc` clears) |
 | `s` | Sort: urgent → updated → waiting |
 | `g` | Group by repo on or off |
 | `space` | Fold or unfold the repo |
-| `b` / `d` | Hide or show bot PRs (hidden by default) / drafts |
-| `r` | Refresh now |
-| `R` | Force refresh: refresh everything and run the watchers now instead of waiting for the next watcher check (the spending guard still applies) |
-| Drag a panel border | Resize: list width, detail height, agents/Claude split, activity height. Saved in `sizes.json` next to `watches.json` |
-| `=` | Reset panel sizes |
+| `b` / `d` | Hide or show bot PRs / drafts |
+| `r` / `R` | Refresh / refresh and run the watchers now |
+| drag a border / `=` | Resize panels / reset sizes |
 | `?` | Help |
 | `q` | Quit |
 
-## Agents
+## How it works
 
-Starting an agent for `owner/repo#N`:
+### PR status
 
-1. Finds the herdr workspace labelled `repo`, or creates it at `$CUTIE_ROOT/repo`.
-2. Finds the tab labelled `fix #N` (your PR) or `review #N` (someone else's), and a pane in it without an agent, or creates the tab.
-3. Runs `herdr agent start fix-repo-N --kind omp` (`rev-repo-N` for reviews), then prompts it to spawn an `orchestrator` or `reviewer` task agent. The prompts forbid pushing and posting to GitHub.
+| Tab | Status | Meaning |
+|---|---|---|
+| Mine | `needs work` | A review thread waits on your reply, or a reviewer wrote after your last push |
+| Mine | `in review` / `approved` / `draft` | As on GitHub |
+| Review | `to review` | You haven't reviewed it |
+| Review | `new commits` | The author pushed after your last review |
+| Review | `reviewed` | You reviewed the current head |
 
-The agent name ties the pane to the PR.
+A PR is drawn as stacked when the same author's PR branch is its base. Shared branches (`main`, `staging`, `development`, …) never count.
 
-## Watchers and notifications
+### Agents
 
-`w` saves the PR's current state as a baseline in `~/Library/Application Support/cutie/watches.json`. Every `CUTIE_WATCH_MINUTES` (30 by default), a watched PR with newer activity (new reviewer feedback on yours, new commits on one you review) gets its agent prompted to follow up, or a new agent started; feedback that piles up in between wakes the agent once. A watcher waits while its agent is working or blocked, and all watchers pause while the 5 hour Claude window is above `CUTIE_GUARD`. Watches on merged or closed PRs are dropped. Watching only runs while cutie is open.
+For `owner/repo#N`, cutie uses the herdr workspace labelled `repo` (created at `$CUTIE_ROOT/repo` if missing), a tab labelled `fix #N` or `review #N`, and an agent named `fix-repo-N` or `rev-repo-N`. The name ties the agent to the PR, so cutie can show its state and jump back to it.
 
-herdr notifications (with sound) fire when any agent starts waiting for you and when a watched PR of yours gets new feedback.
+### Watchers
+
+`w` remembers the PR's current state. Every `CUTIE_WATCH_MINUTES`, a watched PR with newer activity gets its agent woken with the follow-up prompt, or a new agent started. A watcher waits while its agent is working or waiting for you, and all watchers pause above `CUTIE_GUARD`. Watches end when the PR is merged or closed, and only run while cutie is open. The Activity panel logs every check.
+
+herdr notifications fire when an agent starts waiting for you and when a watched PR of yours gets new feedback.
+
+### Files
+
+cutie keeps `watches.json`, `sizes.json` and `prompts/` in `~/Library/Application Support/cutie/` (macOS) or `~/.config/cutie/` (Linux).
+
+## Project layout
+
+```text
+main.go                  entry point: config, prompts, state → ui.Run
+internal/
+  config/                CUTIE_* settings
+  github/                PR queries through gh, status rules, rate limit
+  herdr/                 workspaces, panes, agents, notifications
+  omp/                   Claude plan windows, 24h stats, per-session cost
+  agents/                agent names, watch triggers, prompt templates
+  state/                 watches and panel sizes on disk
+  ui/                    Bubble Tea model, views, demo data
+  utils/                 running CLIs, formatting, text layout
+docs/demo.tape           recording script for docs/demo.gif
+```
+
+## Development
+
+```sh
+go vet ./...
+go build -o ~/.local/bin/cutie .
+CUTIE_DEMO=1 cutie
+```
+
+Re-record the GIF with [vhs](https://github.com/charmbracelet/vhs) (unset `NO_COLOR` and `CI`, which turn colors off):
+
+```sh
+env -u NO_COLOR -u CI vhs docs/demo.tape
+```
+
+## License
+
+[MIT](LICENSE)

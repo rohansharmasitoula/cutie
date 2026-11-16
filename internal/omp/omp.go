@@ -1,14 +1,14 @@
-package main
+// Package omp reads Claude usage from omp: plan windows, 24h stats and per-session cost.
+package omp
 
 import (
 	"bufio"
 	"bytes"
 	"encoding/json"
-	"fmt"
+	"github.com/rohansharmasitoula/cutie/internal/utils"
 	"io"
 	"io/fs"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -24,10 +24,6 @@ type Limit struct {
 
 // FetchLimits reads the Anthropic plan windows that every Claude model shares.
 func FetchLimits() ([]Limit, error) {
-	out, err := exec.Command("omp", "usage", "--json", "-p", "anthropic").Output()
-	if err != nil {
-		return nil, fmt.Errorf("omp usage: %w", err)
-	}
 	var resp struct {
 		Reports []struct {
 			Limits []struct {
@@ -42,8 +38,8 @@ func FetchLimits() ([]Limit, error) {
 			} `json:"limits"`
 		} `json:"reports"`
 	}
-	if err := json.Unmarshal(out, &resp); err != nil {
-		return nil, fmt.Errorf("omp usage: decoding: %w", err)
+	if err := utils.RunJSON(&resp, "omp", "usage", "--json", "-p", "anthropic"); err != nil {
+		return nil, err
 	}
 	var limits []Limit
 	for _, r := range resp.Reports {
@@ -73,10 +69,6 @@ type Stats struct {
 
 // FetchStats runs `omp stats --json`, which first syncs new session files (a few seconds).
 func FetchStats(root string) (Stats, error) {
-	out, err := exec.Command("omp", "stats", "--json").Output()
-	if err != nil {
-		return Stats{}, fmt.Errorf("omp stats: %w", err)
-	}
 	var resp struct {
 		Overall struct {
 			TotalCost float64 `json:"totalCost"`
@@ -95,12 +87,8 @@ func FetchStats(root string) (Stats, error) {
 			TotalCost float64 `json:"totalCost"`
 		} `json:"byFolder"`
 	}
-	// The JSON follows "Syncing…" progress lines on stdout.
-	if i := bytes.IndexByte(out, '{'); i > 0 {
-		out = out[i:]
-	}
-	if err := json.Unmarshal(out, &resp); err != nil {
-		return Stats{}, fmt.Errorf("omp stats: decoding: %w", err)
+	if err := utils.RunJSON(&resp, "omp", "stats", "--json"); err != nil {
+		return Stats{}, err
 	}
 	s := Stats{Cost: resp.Overall.TotalCost}
 	sort.Slice(resp.TimeSeries, func(i, j int) bool { return resp.TimeSeries[i].Timestamp < resp.TimeSeries[j].Timestamp })
