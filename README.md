@@ -158,20 +158,6 @@ internal/
 docs/demo.tape           recording script for docs/demo.gif
 ```
 
-## Development
-
-```sh
-go vet ./...
-go build -o ~/.local/bin/cutie .
-CUTIE_DEMO=1 cutie
-```
-
-Re-record the GIF with [vhs](https://github.com/charmbracelet/vhs) (unset `NO_COLOR` and `CI`, which turn colors off):
-
-```sh
-env -u NO_COLOR -u CI vhs docs/demo.tape
-```
-
 ## ☕ Support
 
 If cutie saves you time, you can support its development:

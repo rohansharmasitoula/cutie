@@ -3,6 +3,7 @@ package herdr
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"github.com/rohansharmasitoula/cutie/internal/utils"
 	"os"
@@ -45,20 +46,29 @@ func (a Agent) SessionPath() string {
 	return ""
 }
 
-type herdrError struct {
-	Error struct {
-		Code    string `json:"code"`
-		Message string `json:"message"`
-	} `json:"error"`
+// Error is a failure herdr reported as JSON, e.g. code "agent_not_ready".
+type Error struct {
+	Cmd     string
+	Code    string `json:"code"`
+	Message string `json:"message"`
+}
+
+func (e *Error) Error() string { return e.Cmd + ": " + e.Code + ": " + e.Message }
+
+// IsCode reports whether err is a herdr error with the given code.
+func IsCode(err error, code string) bool {
+	var he *Error
+	return errors.As(err, &he) && he.Code == code
 }
 
 // herdr runs a herdr CLI command and decodes its `.result` into out (if non-nil).
 func herdr(out any, args ...string) error {
 	stdout, err := utils.Run("herdr", args...)
 	if ce, ok := utils.AsCmdError(err); ok {
-		var he herdrError
-		if json.Unmarshal(ce.Stderr, &he) == nil && he.Error.Message != "" {
-			return fmt.Errorf("herdr %s: %s: %s", args[0], he.Error.Code, he.Error.Message)
+		var body struct{ Error Error }
+		if json.Unmarshal(ce.Stderr, &body) == nil && body.Error.Code != "" {
+			body.Error.Cmd = "herdr " + args[0]
+			return &body.Error
 		}
 		return err
 	}
@@ -212,21 +222,33 @@ func FreePane(wsLabel, tabLabel, dir string) (string, error) {
 	return c.RootPane.ID, nil
 }
 
-// StartAgent starts a named agent of the given herdr kind (omp, claude, codex, …) in a shell pane and submits the prompt.
-// A just-created pane may still be starting its shell, so the start is retried briefly.
+// StartAgent starts a named agent of the given herdr kind (omp, claude, codex, …) in a
+// shell pane and submits the prompt. A just-created pane may still be starting its
+// shell, so the start is retried briefly. An agent that stops at a startup question
+// (e.g. Claude asking whether to trust the folder) gets the prompt once the user has
+// answered it, waiting up to startupWait.
 func StartAgent(name, kind, paneID, prompt string) error {
 	var err error
 	for range 5 {
-		if err = herdr(nil, "agent", "start", name, "--kind", kind, "--pane", paneID, "--timeout", "60000"); err == nil {
+		err = herdr(nil, "agent", "start", name, "--kind", kind, "--pane", paneID, "--timeout", "60000")
+		if err == nil || IsCode(err, "agent_not_ready") {
 			break
 		}
 		time.Sleep(time.Second)
+	}
+	if IsCode(err, "agent_not_ready") {
+		err = herdr(nil, "agent", "wait", name, "--until", "idle", "--timeout", fmt.Sprint(startupWait.Milliseconds()))
+		if err != nil {
+			return fmt.Errorf("%s is waiting for you (answer it in its pane, then press p to send the PR): %w", name, err)
+		}
 	}
 	if err != nil {
 		return err
 	}
 	return PromptAgent(name, prompt)
 }
+
+const startupWait = 10 * time.Minute
 
 func PromptAgent(name, prompt string) error {
 	return herdr(nil, "agent", "prompt", name, prompt)
