@@ -1,5 +1,13 @@
 # cutie
 
+[![CI](https://github.com/rohansharmasitoula/cutie/actions/workflows/ci.yml/badge.svg)](https://github.com/rohansharmasitoula/cutie/actions/workflows/ci.yml)
+[![Go Reference](https://pkg.go.dev/badge/github.com/rohansharmasitoula/cutie.svg)](https://pkg.go.dev/github.com/rohansharmasitoula/cutie)
+[![Go Report Card](https://goreportcard.com/badge/github.com/rohansharmasitoula/cutie)](https://goreportcard.com/report/github.com/rohansharmasitoula/cutie)
+[![Go version](https://img.shields.io/github/go-mod/go-version/rohansharmasitoula/cutie)](go.mod)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![GitHub stars](https://img.shields.io/github/stars/rohansharmasitoula/cutie)](https://github.com/rohansharmasitoula/cutie/stargazers)
+[![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-support-orange?logo=buy-me-a-coffee)](https://buymeacoffee.com/sitoularohansharma)
+
 **A terminal dashboard for your pull requests and the AI coding agents working on them.**
 
 cutie lists your open PRs and the PRs waiting for your review, tells you which ones need you, and with one key starts a coding agent on a PR in its own [herdr](https://herdr.dev) pane. It then shows what each agent is doing and what it has cost, and can watch PRs to wake the agent when reviewers reply or authors push.
@@ -164,6 +172,12 @@ Re-record the GIF with [vhs](https://github.com/charmbracelet/vhs) (unset `NO_CO
 ```sh
 env -u NO_COLOR -u CI vhs docs/demo.tape
 ```
+
+## ☕ Support
+
+If cutie saves you time, you can support its development:
+
+[![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-support%20development-orange?style=for-the-badge&logo=buy-me-a-coffee)](https://buymeacoffee.com/sitoularohansharma)
 
 ## License
 
