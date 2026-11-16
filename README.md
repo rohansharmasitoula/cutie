@@ -2,7 +2,6 @@
 
 [![CI](https://github.com/rohansharmasitoula/cutie/actions/workflows/ci.yml/badge.svg)](https://github.com/rohansharmasitoula/cutie/actions/workflows/ci.yml)
 [![Go Reference](https://pkg.go.dev/badge/github.com/rohansharmasitoula/cutie.svg)](https://pkg.go.dev/github.com/rohansharmasitoula/cutie)
-[![Go Report Card](https://goreportcard.com/badge/github.com/rohansharmasitoula/cutie)](https://goreportcard.com/report/github.com/rohansharmasitoula/cutie)
 [![Go version](https://img.shields.io/github/go-mod/go-version/rohansharmasitoula/cutie)](go.mod)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![GitHub stars](https://img.shields.io/github/stars/rohansharmasitoula/cutie)](https://github.com/rohansharmasitoula/cutie/stargazers)
