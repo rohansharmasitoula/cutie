@@ -23,6 +23,13 @@ Tab Sleep 1.5s
 Down Sleep 1s
 Down Sleep 2.5s
 Tab Sleep 1.5s
+Down Sleep 3s
+Down Sleep 400ms
+Down Sleep 400ms
+Down Sleep 400ms
+Down Sleep 1.2s
+Enter Sleep 2.5s
+Type "1" Sleep 1.5s
 Type "/" Sleep 300ms Type "billing" Sleep 1.2s Enter Sleep 1.5s
 Escape Sleep 800ms
 Type "?" Sleep 2.5s

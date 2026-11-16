@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"strings"
 	"time"
 
 	"github.com/rohansharmasitoula/cutie/internal/agents"
@@ -81,7 +82,17 @@ func demoIssues() []github.Issue {
 	}
 }
 
-func demoTail() []string {
+// demoTail is the made-up output of agent; issue agents show issue work.
+func demoTail(agent string) []string {
+	if strings.HasPrefix(agent, "iss-") {
+		return []string{
+			"Read the issue and 4 comments",
+			"Branch you/430-search-rate-limit from main",
+			"Added a token bucket per API key in search/limit.go",
+			"429 with Retry-After; counter search_rejected_total",
+			"go test ./search/... ok (1.4s)",
+		}
+	}
 	return []string{
 		"Reading the unresolved review threads",
 		"Fixing auth/refresh.go: revoke the previous token on rotation",

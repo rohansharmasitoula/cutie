@@ -105,12 +105,12 @@ func (b *demoBackend) Snapshot() (github.Snapshot, error) {
 func (b *demoBackend) Agents() ([]herdr.Agent, error) {
 	return demoAgents(b.mine, b.review, b.issues), nil
 }
-func (b *demoBackend) Tail(string, int) ([]string, error)  { return demoTail(), nil }
-func (b *demoBackend) Limits() ([]omp.Limit, error)        { l, _, _ := demoUsage(); return l, nil }
-func (b *demoBackend) Stats() (omp.Stats, error)           { _, s, _ := demoUsage(); return s, nil }
-func (b *demoBackend) Start(_, _, _, _, _, _ string) error { return nil }
-func (b *demoBackend) Prompt(string, string) error         { return nil }
-func (b *demoBackend) Focus(string) error                  { return nil }
-func (b *demoBackend) Close(string) error                  { return nil }
-func (b *demoBackend) Notify(string, string) error         { return nil }
-func (b *demoBackend) Open(string) error                   { return nil }
+func (b *demoBackend) Tail(agent string, _ int) ([]string, error) { return demoTail(agent), nil }
+func (b *demoBackend) Limits() ([]omp.Limit, error)               { l, _, _ := demoUsage(); return l, nil }
+func (b *demoBackend) Stats() (omp.Stats, error)                  { _, s, _ := demoUsage(); return s, nil }
+func (b *demoBackend) Start(_, _, _, _, _, _ string) error        { return nil }
+func (b *demoBackend) Prompt(string, string) error                { return nil }
+func (b *demoBackend) Focus(string) error                         { return nil }
+func (b *demoBackend) Close(string) error                         { return nil }
+func (b *demoBackend) Notify(string, string) error                { return nil }
+func (b *demoBackend) Open(string) error                          { return nil }
