@@ -455,6 +455,13 @@ func (m model) renderIssue(i github.Issue, selected bool, w int) string {
 		ref = i.RepoName + " " + ref
 	}
 	right := m.agentCell(issueWork(i))
+	if len(i.Linked) > 0 {
+		var prs []string
+		for _, lp := range i.Linked {
+			prs = append(prs, fg(linkedColor(lp), linkedRef(i, lp)))
+		}
+		right = append(right, "→ "+strings.Join(prs, " "))
+	}
 	if len(i.Labels) > 0 {
 		right = append(right, fg(cPurple, strings.Join(i.Labels, ",")))
 	}
@@ -469,6 +476,49 @@ func (m model) renderIssue(i github.Issue, selected bool, w int) string {
 		return sel.Render(ansi.Strip(line))
 	}
 	return line
+}
+
+// linkedRef is "#N", with the repo when the PR lives in another repo than the issue.
+func linkedRef(i github.Issue, lp github.LinkedPR) string {
+	if lp.Repo != i.Repo {
+		return fmt.Sprintf("%s#%d", lp.Repo[strings.LastIndex(lp.Repo, "/")+1:], lp.Number)
+	}
+	return fmt.Sprintf("#%d", lp.Number)
+}
+
+// linkedColor: merged green, draft dim, open cyan.
+func linkedColor(lp github.LinkedPR) lipgloss.Color {
+	switch {
+	case lp.State == "MERGED":
+		return cGood
+	case lp.IsDraft:
+		return cDim
+	}
+	return cCyan
+}
+
+// linkedLines lists the issue's linked PRs, with cutie's status for the ones in your list.
+func (m model) linkedLines(i github.Issue) []string {
+	if len(i.Linked) == 0 {
+		return nil
+	}
+	known := map[string]github.PR{}
+	for _, p := range m.allPRs() {
+		known[p.Key()] = p
+	}
+	l := []string{bold.Render(fmt.Sprintf("Linked PRs (%d)", len(i.Linked)))}
+	for _, lp := range i.Linked {
+		state := strings.ToLower(lp.State)
+		if lp.IsDraft && lp.State == "OPEN" {
+			state = "draft"
+		}
+		line := fg(linkedColor(lp), linkedRef(i, lp)) + " " + dim.Render(state)
+		if p, ok := known[fmt.Sprintf("%s#%d", lp.Repo, lp.Number)]; ok {
+			line = fg(linkedColor(lp), linkedRef(i, lp)) + " " + p.Title + dim.Render(" · ") + fg(statusColor[p.Status], p.Status.Label())
+		}
+		l = append(l, line)
+	}
+	return append(l, "")
 }
 
 // waitColor warms with time since the last push: fresh, a day, several days.
@@ -631,6 +681,7 @@ func (m model) issueDetail(i github.Issue, w int) (string, []string) {
 	}
 	meta = append(meta, dim.Render(fmt.Sprintf("%d comment(s)", i.Comments)))
 	l = append(l, strings.Join(meta, dim.Render(" · ")), "")
+	l = append(l, m.linkedLines(i)...)
 	l = append(l, m.agentLines(issueWork(i), "an agent on the issue")...)
 
 	// The body goes last: it can be long, and the panel cuts what does not fit.

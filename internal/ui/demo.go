@@ -72,9 +72,11 @@ func demoIssues() []github.Issue {
 			CreatedAt: now.Add(-4 * age), UpdatedAt: now.Add(-age),
 		}
 	}
+	search := issue("api", 430, "Rate-limit the public search endpoint", "maya", []string{"backend", "security"}, 4, 3*time.Hour,
+		"Search has no limit per API key, so one client can starve the others.\n\nAcceptance:\n- 60 requests a minute per key, configurable\n- 429 with a Retry-After header\n- a metric for rejected requests")
+	search.Linked = []github.LinkedPR{{Repo: "acme/api", Number: 431, URL: "https://github.com/acme/api/pull/431", State: "OPEN", IsDraft: true}}
 	return []github.Issue{
-		issue("api", 430, "Rate-limit the public search endpoint", "maya", []string{"backend", "security"}, 4, 3*time.Hour,
-			"Search has no limit per API key, so one client can starve the others.\n\nAcceptance:\n- 60 requests a minute per key, configurable\n- 429 with a Retry-After header\n- a metric for rejected requests"),
+		search,
 		issue("web", 251, "Dark mode for the settings pages", "leo", []string{"frontend"}, 1, 26*time.Hour,
 			"The settings pages ignore the theme toggle and stay light."),
 		issue("infra", 110, "Alert when the job queue backs up", "sam", []string{"ops"}, 0, 72*time.Hour,

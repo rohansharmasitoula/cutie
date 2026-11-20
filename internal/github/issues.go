@@ -18,6 +18,18 @@ type Issue struct {
 	Comments  int
 	CreatedAt time.Time
 	UpdatedAt time.Time
+	// Linked are the PRs GitHub links to the issue (its Development section, or
+	// "Closes #N" in a PR), oldest first. Closed unmerged PRs are left out.
+	Linked []LinkedPR
+}
+
+// LinkedPR is a PR linked to an issue.
+type LinkedPR struct {
+	Repo    string // owner/name
+	Number  int
+	URL     string
+	State   string // OPEN or MERGED
+	IsDraft bool
 }
 
 // Key identifies an issue across refreshes; it never collides with a PR key because
@@ -33,6 +45,9 @@ fragment I on Issue {
   author { login }
   labels(first: 10) { nodes { name } }
   comments { totalCount }
+  closedByPullRequestsReferences(first: 5, includeClosedPrs: true) {
+    nodes { number url state isDraft repository { nameWithOwner } }
+  }
 }`
 
 type rawIssue struct {
@@ -55,6 +70,17 @@ type rawIssue struct {
 	Comments struct {
 		TotalCount int `json:"totalCount"`
 	} `json:"comments"`
+	ClosedBy struct {
+		Nodes []struct {
+			Number     int    `json:"number"`
+			URL        string `json:"url"`
+			State      string `json:"state"`
+			IsDraft    bool   `json:"isDraft"`
+			Repository struct {
+				NameWithOwner string `json:"nameWithOwner"`
+			} `json:"repository"`
+		} `json:"nodes"`
+	} `json:"closedByPullRequestsReferences"`
 }
 
 func convertIssue(r rawIssue) Issue {
@@ -74,6 +100,11 @@ func convertIssue(r rawIssue) Issue {
 	}
 	for _, l := range r.Labels.Nodes {
 		i.Labels = append(i.Labels, l.Name)
+	}
+	for _, n := range r.ClosedBy.Nodes {
+		if n.Number > 0 && n.State != "CLOSED" {
+			i.Linked = append(i.Linked, LinkedPR{Repo: n.Repository.NameWithOwner, Number: n.Number, URL: n.URL, State: n.State, IsDraft: n.IsDraft})
+		}
 	}
 	return i
 }

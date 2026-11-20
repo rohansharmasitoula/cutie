@@ -137,7 +137,7 @@ A PR is drawn as stacked when the same author's PR branch is its base. Shared br
 
 ### Agents
 
-For `owner/repo#N`, cutie uses the herdr workspace labelled `repo` (created in the repo's clone if missing), a tab labelled `fix #N`, `review #N` or `issue #N`, and an agent named `fix-repo-N`, `rev-repo-N` or `iss-repo-N`. The name ties the agent to the PR or issue, so cutie can show its state and jump back to it. The Issues tab lists open issues assigned to you; they come with the same cheap poll as the PR list.
+For `owner/repo#N`, cutie uses the herdr workspace labelled `repo` (created in the repo's clone if missing), a tab labelled `fix #N`, `review #N` or `issue #N`, and an agent named `fix-repo-N`, `rev-repo-N` or `iss-repo-N`. The name ties the agent to the PR or issue, so cutie can show its state and jump back to it. The Issues tab lists open issues assigned to you; they come with the same cheap poll as the PR list. An issue's row shows its linked PRs (`→ #N`: open, draft dim, merged green), the ones in GitHub's Development section or with "Closes #N"; the detail panel lists them with cutie's status for PRs in your lists.
 
 ### Watchers
 
