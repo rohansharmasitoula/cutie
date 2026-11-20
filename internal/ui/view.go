@@ -699,7 +699,43 @@ func helpLines() []string {
 // ---- agents & tokens ----
 
 func (m model) agentsTitle() string {
-	return fmt.Sprintf("Agents · %d", len(m.agents))
+	t := fmt.Sprintf("Agents · %d", len(m.agents))
+	if n := len(m.queue); n > 0 {
+		t += fmt.Sprintf(" · ⧗ %d queued", n)
+	}
+	return t
+}
+
+// queueShown caps the review queue lines in the Agents panel, so the agents stay visible.
+const queueShown = 5
+
+// queueLines lists the review queue in order, with what it waits on.
+func (m model) queueLines(w int) []string {
+	if len(m.queue) == 0 {
+		return nil
+	}
+	hold := m.queueHold()
+	if hold == "" {
+		hold = "starting the next one"
+	}
+	l := []string{utils.Spread(warn.Render("⧗ Review queue"), dim.Render(hold), w)}
+	byKey := map[string]github.PR{}
+	for _, p := range m.review {
+		byKey[p.Key()] = p
+	}
+	for i, key := range m.queue[:min(len(m.queue), queueShown)] {
+		p, ok := byKey[key]
+		if !ok {
+			l = append(l, dim.Render(fmt.Sprintf("%d %s (not open)", i+1, key)))
+			continue
+		}
+		left := fmt.Sprintf("%s %s %s", dim.Render(fmt.Sprint(i+1)), bold.Render(ref(p)), p.Title)
+		l = append(l, utils.Spread(left, fg(statusColor[p.Status], p.Status.Label()), w))
+	}
+	if more := len(m.queue) - queueShown; more > 0 {
+		l = append(l, dim.Render(fmt.Sprintf("… %d more", more)))
+	}
+	return append(l, "")
 }
 
 func (m model) agentsBody(w int) []string {
@@ -716,11 +752,12 @@ func (m model) agentsBody(w int) []string {
 		}
 		return ri < rj
 	})
+	l := m.queueLines(w)
 	if len(as) == 0 {
-		return []string{dim.Render("no agents running")}
+		return append(l, dim.Render("no agents running"))
 	}
-	var l []string
 	total := 0.0
+	var rows []string
 	for _, a := range as {
 		if a.Cost > 0 {
 			total += a.Cost
@@ -729,9 +766,10 @@ func (m model) agentsBody(w int) []string {
 		if a.Name == "" {
 			label = dim.Render(label)
 		}
-		l = append(l, utils.Spread(fg(agentColor[a.Status], "●")+" "+label, dim.Render(utils.Money(a.Cost)), w))
+		rows = append(rows, utils.Spread(fg(agentColor[a.Status], "●")+" "+label, dim.Render(utils.Money(a.Cost)), w))
 	}
-	return append([]string{utils.Spread(dim.Render("blocked first"), dim.Render("total "+utils.Money(total)), w)}, l...)
+	l = append(l, utils.Spread(dim.Render("blocked first"), dim.Render("total "+utils.Money(total)), w))
+	return append(l, rows...)
 }
 
 func (m model) tokensBody(w int) []string {

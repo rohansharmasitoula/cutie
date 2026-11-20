@@ -658,24 +658,40 @@ func (m *model) runWatchers() []tea.Cmd {
 	return cmds
 }
 
-// runQueue starts the next queued review once no review agent is starting, working or
-// waiting for you, so reviews run one at a time. It holds while the spending guard
-// pauses watchers. Queued PRs that were merged, closed or no longer need a review
-// leave the queue with an Activity line.
-func (m *model) runQueue() tea.Cmd {
-	if len(m.queue) == 0 || m.refreshed.IsZero() || m.paused || time.Now().Before(m.queueAfter) {
-		return nil
+// queueHold says why the review queue cannot start its next review now, or "" when it
+// can: reviews run one at a time, so it waits for any review agent that is starting,
+// working or waiting for you, then for queueSettle, and holds under the spending guard.
+func (m model) queueHold() string {
+	switch {
+	case m.refreshed.IsZero():
+		return "loading"
+	case m.paused:
+		return "held by the spending guard"
+	}
+	for _, p := range m.review {
+		if m.inflight[p.Key()] {
+			return "starting " + agents.Name(p)
+		}
 	}
 	for _, a := range m.agents {
 		if agents.IsReview(a.Name) && (a.Status == "working" || a.Status == "blocked") {
-			return nil
+			return "waiting for " + a.Name + " (" + a.Status + ")"
 		}
+	}
+	if wait := time.Until(m.queueAfter); wait > 0 {
+		return fmt.Sprintf("next in %ds", int(wait.Seconds())+1)
+	}
+	return ""
+}
+
+// runQueue starts the next queued review when queueHold allows it. Queued PRs that were
+// merged, closed or no longer need a review leave the queue with an Activity line.
+func (m *model) runQueue() tea.Cmd {
+	if len(m.queue) == 0 || m.queueHold() != "" {
+		return nil
 	}
 	byKey := map[string]github.PR{}
 	for _, p := range m.review {
-		if m.inflight[p.Key()] {
-			return nil
-		}
 		byKey[p.Key()] = p
 	}
 	defer m.save("review queue", m.queue.Save, "")

@@ -147,7 +147,7 @@ herdr notifications fire when an agent starts waiting for you and when a watched
 
 ### Review queue
 
-`a` on a PR in the Review tab puts it at the end of the review queue instead of starting an agent now. The queue starts one review at a time: the next PR gets its agent only when no review agent is starting, working or waiting for you. A PR that was merged, closed or no longer needs your review leaves the queue when its turn comes. The queue holds above `CUTIE_GUARD`, like the watchers, survives restarts, and only runs while cutie is open.
+`a` on a PR in the Review tab puts it at the end of the review queue instead of starting an agent now. The queue starts one review at a time: the next PR gets its agent only when no review agent is starting, working or waiting for you. A PR that was merged, closed or no longer needs your review leaves the queue when its turn comes. The queue holds above `CUTIE_GUARD`, like the watchers, survives restarts, and only runs while cutie is open. The top of the Agents panel lists the queue in order and says what it is waiting for.
 
 ### Files
 
