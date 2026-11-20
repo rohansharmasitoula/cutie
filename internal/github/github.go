@@ -18,9 +18,10 @@ const (
 	StatusInReview
 	StatusNeedsWork
 	StatusApproved
-	StatusToReview        // review section: you have not reviewed it yet
-	StatusReviewedUpdated // review section: new commits since your last review
-	StatusReviewed        // review section: you reviewed the current head
+	StatusToReview        // review section: you are requested and have not reviewed it yet
+	StatusReRequested     // review section: you reviewed it and were requested again
+	StatusReviewedUpdated // review section: new commits since your last review, no new request
+	StatusReviewed        // review section: you reviewed the current head, no new request
 )
 
 func (s Status) Label() string {
@@ -35,6 +36,8 @@ func (s Status) Label() string {
 		return "approved"
 	case StatusToReview:
 		return "to review"
+	case StatusReRequested:
+		return "re-review"
 	case StatusReviewedUpdated:
 		return "new commits"
 	case StatusReviewed:
@@ -43,15 +46,16 @@ func (s Status) Label() string {
 	return "?"
 }
 
-// Actionable reports whether Enter should start an agent for a PR in this status.
+// Actionable reports whether Enter should start an agent for a PR in this status. A
+// PR you review only needs you while GitHub lists you as a requested reviewer.
 func (s Status) Actionable() bool {
-	return s == StatusNeedsWork || s == StatusToReview || s == StatusReviewedUpdated
+	return s == StatusNeedsWork || s == StatusToReview || s == StatusReRequested
 }
 
 // Urgency orders statuses for the "urgent" sort: lower comes first.
 func (s Status) Urgency() int {
 	switch s {
-	case StatusNeedsWork, StatusReviewedUpdated:
+	case StatusNeedsWork, StatusReRequested:
 		return 0
 	case StatusToReview:
 		return 1
@@ -59,10 +63,12 @@ func (s Status) Urgency() int {
 		return 2
 	case StatusApproved:
 		return 3
-	case StatusReviewed:
+	case StatusReviewedUpdated:
 		return 4
+	case StatusReviewed:
+		return 5
 	}
-	return 5 // draft
+	return 6 // draft
 }
 
 // CheckState is a CI check result normalized across CheckRun and StatusContext.
@@ -115,6 +121,8 @@ type PR struct {
 	LastCommit time.Time
 	// LastFeedback is the newest review or comment by a human other than the author.
 	LastFeedback time.Time
+	// MyLastReview is when you last submitted a review; only for PRs you review.
+	MyLastReview time.Time
 	Status       Status
 	Mine         bool
 	IsBot        bool // author is a bot (dependabot, renovate, …)
@@ -408,18 +416,20 @@ func (f *Fetcher) Fetch() (Snapshot, error) {
 
 	for _, n := range list.Mine.Nodes {
 		if r, ok := f.cache[n.ID]; ok {
-			s.Mine = append(s.Mine, convert(r, s.Login, true))
+			s.Mine = append(s.Mine, convert(r, s.Login, true, false))
 		}
 	}
+	// The requested search also finds requests to your teams, which the PR's own
+	// reviewRequests cannot tie to you, so a PR is requested when that search lists it.
 	seen := map[string]bool{}
-	for _, nodes := range [][]listNode{list.Requested.Nodes, list.Reviewed.Nodes} {
+	for i, nodes := range [][]listNode{list.Requested.Nodes, list.Reviewed.Nodes} {
 		for _, n := range nodes {
 			r, ok := f.cache[n.ID]
 			if !ok || seen[n.ID] {
 				continue
 			}
 			seen[n.ID] = true
-			s.Review = append(s.Review, convert(r, s.Login, false))
+			s.Review = append(s.Review, convert(r, s.Login, false, i == 0))
 		}
 	}
 	return s, nil
@@ -455,7 +465,9 @@ func checkState(typename, status, conclusion, state string) CheckState {
 	return CheckFail
 }
 
-func convert(r rawPR, me string, mine bool) PR {
+// convert builds the dashboard's PR. requested: GitHub lists you as a reviewer it waits
+// on (a first request, or a re-request after your review); only for PRs you review.
+func convert(r rawPR, me string, mine, requested bool) PR {
 	p := PR{
 		Repo:      r.Repository.NameWithOwner,
 		RepoName:  r.Repository.Name,
@@ -510,9 +522,30 @@ func convert(r rawPR, me string, mine bool) PR {
 			}
 		}
 	}
+	// approved holds the reviewers whose latest verdict is an approval. Their comments do
+	// not mean work: replying to threads and then approving leaves a COMMENTED review just
+	// before the APPROVED one, and many reviewers post an "LGTM" comment after approving.
+	approved := map[string]bool{}
+	for _, rv := range r.Reviews.Nodes { // oldest first, so the last verdict wins
+		switch rv.State {
+		case "APPROVED":
+			approved[rv.Author.Login] = true
+		case "CHANGES_REQUESTED", "DISMISSED":
+			approved[rv.Author.Login] = false
+		}
+	}
+	var waiting time.Time // newest feedback that still waits on you
+	note := func(who string, at time.Time) {
+		if at.After(p.LastFeedback) {
+			p.LastFeedback = at
+		}
+		if !approved[who] && at.After(waiting) {
+			waiting = at
+		}
+	}
 	for _, c := range r.Comments.Nodes {
-		if c.Author.human() && c.Author.Login != p.Author && c.CreatedAt.After(p.LastFeedback) {
-			p.LastFeedback = c.CreatedAt
+		if c.Author.human() && c.Author.Login != p.Author {
+			note(c.Author.Login, c.CreatedAt)
 		}
 	}
 	myReviewedOID, iReviewed := "", false
@@ -521,11 +554,12 @@ func convert(r rawPR, me string, mine bool) PR {
 			continue
 		}
 		feedback := rv.State == "COMMENTED" || rv.State == "CHANGES_REQUESTED"
-		if feedback && rv.Author.Login != p.Author && rv.SubmittedAt.After(p.LastFeedback) {
-			p.LastFeedback = rv.SubmittedAt
+		if feedback && rv.Author.Login != p.Author {
+			note(rv.Author.Login, rv.SubmittedAt)
 		}
 		if rv.Author.Login == me {
 			iReviewed = true
+			p.MyLastReview = rv.SubmittedAt
 			if rv.Commit != nil {
 				myReviewedOID = rv.Commit.OID // reviews are oldest first, so the last one wins
 			}
@@ -533,8 +567,10 @@ func convert(r rawPR, me string, mine bool) PR {
 	}
 
 	switch {
-	case !mine && !iReviewed:
+	case !mine && requested && !iReviewed:
 		p.Status = StatusToReview
+	case !mine && requested:
+		p.Status = StatusReRequested
 	case !mine && myReviewedOID != p.HeadOID:
 		p.Status = StatusReviewedUpdated
 	case !mine:
@@ -543,8 +579,9 @@ func convert(r rawPR, me string, mine bool) PR {
 		p.Status = StatusDraft
 	// A CHANGES_REQUESTED decision alone stays set after you push the fixes, until the
 	// reviewer looks again; it only means work when a thread waits on you (you were not
-	// the last to reply) or feedback is newer than your last push.
-	case p.Open() > 0 || p.LastFeedback.After(p.LastCommit):
+	// the last to reply) or feedback from someone who has not approved is newer than
+	// your last push.
+	case p.Open() > 0 || waiting.After(p.LastCommit):
 		p.Status = StatusNeedsWork
 	case p.Decision == "APPROVED":
 		p.Status = StatusApproved

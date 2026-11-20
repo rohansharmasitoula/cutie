@@ -9,7 +9,7 @@
 
 **A terminal dashboard for your pull requests and the AI coding agents working on them.**
 
-cutie lists your open PRs and the PRs waiting for your review, tells you which ones need you, and with one key starts a coding agent on a PR in its own [herdr](https://herdr.dev) pane. It then shows what each agent is doing and what it has cost, and can watch PRs to wake the agent when reviewers reply or authors push.
+cutie lists your open PRs and the PRs waiting for your review, tells you which ones need you, and with one key starts a coding agent on a PR in its own [herdr](https://herdr.dev) pane. It then shows what each agent is doing and what it has cost, and can watch PRs to wake the agent when reviewers reply or authors ask for another review.
 
 ![cutie demo](docs/demo.gif)
 
@@ -21,7 +21,7 @@ cutie lists your open PRs and the PRs waiting for your review, tells you which o
 | 🎯 **Only what needs you** | A PR is flagged when a reviewer is waiting on your reply or commented after your last push. Threads you've already answered stay quiet. |
 | ⚡ **An agent in one keystroke** | Press `enter` on a PR or an issue: cutie opens the repo in herdr, starts a coding agent in its own tab and hands it the work. Press it again to jump there. |
 | 👀 **See every agent at work** | Each agent's status, cost and latest output, right beside the PR's checks, reviewers and open threads. |
-| 🔔 **Watchers** | Watch a PR and its agent wakes up by itself when reviewers reply to yours, or when the author pushes to one you're reviewing. |
+| 🔔 **Watchers** | Watch a PR and its agent wakes up by itself when reviewers reply to yours, or when the author re-requests your review on one you're reviewing. |
 | 💸 **Claude usage, always visible** | Your 5 hour and 7 day limits with reset timers, 24h spend, tokens per hour and model split. Watchers pause before you run out. |
 | 🪶 **Light on GitHub** | One tiny query a minute; full details only for PRs that changed, so your API budget lasts. |
 | 🖱️ **Mouse or keyboard** | Click rows, drag borders to resize panels, filter, sort and fold repos. |
@@ -85,7 +85,7 @@ To use your own, put a file with the same name in `~/Library/Application Support
 | `fix-start.md` | Starting an agent on your PR |
 | `fix-followup.md` | A watcher sees new review feedback on your PR |
 | `review-start.md` | Starting an agent on someone else's PR |
-| `review-followup.md` | A watcher sees new commits on a PR you review |
+| `review-followup.md` | Re-reviewing: a watcher sees a re-request, or the queue reaches a re-requested PR whose agent is still open |
 | `issue-start.md` | Starting an agent on an issue assigned to you |
 
 PR prompts are Go templates with `{{.URL}}`, `{{.Repo}}`, `{{.Number}}`, `{{.Branch}}`, `{{.Base}}`, `{{.Author}}` and `{{.HeadShort}}`; the issue prompt has `{{.URL}}`, `{{.Repo}}`, `{{.Number}}`, `{{.Title}}` and `{{.Author}}`. For example, to hand the work to your own subagent:
@@ -105,6 +105,7 @@ The defaults are in [`internal/agents/prompts`](internal/agents/prompts).
 | `p` | Send a prompt to the row's agent |
 | `x` `x` | Close the row's agent pane (the first `x` asks) |
 | `w` | Watch or unwatch the PR |
+| `a` | Add the PR you review to the review queue, or take it out |
 | `o` | Open the PR or issue in the browser |
 | `tab` / `1` / `2` / `3` | Mine / Review / Issues |
 | `/` | Filter (`esc` clears) |
@@ -125,9 +126,12 @@ The defaults are in [`internal/agents/prompts`](internal/agents/prompts).
 |---|---|---|
 | Mine | `needs work` | A review thread waits on your reply, or a reviewer wrote after your last push |
 | Mine | `in review` / `approved` / `draft` | As on GitHub |
-| Review | `to review` | You haven't reviewed it |
-| Review | `new commits` | The author pushed after your last review |
+| Review | `to review` | You are requested as a reviewer and haven't reviewed it |
+| Review | `re-review` | You reviewed it and the author requested your review again |
+| Review | `new commits` | The author pushed after your last review but hasn't re-requested you; nothing to do yet |
 | Review | `reviewed` | You reviewed the current head |
+
+`enter`, `a` and the review queue only act on `to review` and `re-review`: a PR you review needs you only while GitHub lists you (or your team) as a requested reviewer.
 
 A PR is drawn as stacked when the same author's PR branch is its base. Shared branches (`main`, `staging`, `development`, …) never count.
 
@@ -137,13 +141,17 @@ For `owner/repo#N`, cutie uses the herdr workspace labelled `repo` (created in t
 
 ### Watchers
 
-`w` remembers the PR's current state. Every `CUTIE_WATCH_MINUTES`, a watched PR with newer activity gets its agent woken with the follow-up prompt, or a new agent started. A watcher waits while its agent is working or waiting for you, and all watchers pause above `CUTIE_GUARD`. Watches end when the PR is merged or closed, and only run while cutie is open. The Activity panel logs every check.
+`w` remembers the PR's current state. Every `CUTIE_WATCH_MINUTES`, a watched PR with newer activity gets its agent woken with the follow-up prompt, or a new agent started. Newer activity is review feedback on your PR, or a re-request on a PR you review (pushes alone don't count). A watcher waits while its agent is working or waiting for you, and all watchers pause above `CUTIE_GUARD`. Watches end when the PR is merged or closed, and only run while cutie is open. The Activity panel logs every check.
 
 herdr notifications fire when an agent starts waiting for you and when a watched PR of yours gets new feedback.
 
+### Review queue
+
+`a` on a PR in the Review tab puts it at the end of the review queue instead of starting an agent now. The queue starts one review at a time: the next PR gets its agent only when no review agent is starting, working or waiting for you. A PR that was merged, closed or no longer needs your review leaves the queue when its turn comes. The queue holds above `CUTIE_GUARD`, like the watchers, survives restarts, and only runs while cutie is open.
+
 ### Files
 
-cutie keeps `watches.json`, `sizes.json` and `prompts/` in `~/Library/Application Support/cutie/` (macOS) or `~/.config/cutie/` (Linux).
+cutie keeps `watches.json`, `queue.json`, `sizes.json` and `prompts/` in `~/Library/Application Support/cutie/` (macOS) or `~/.config/cutie/` (Linux).
 
 ## Project layout
 
@@ -155,7 +163,7 @@ internal/
   herdr/                 workspaces, panes, agents, notifications
   omp/                   Claude plan windows, 24h stats, per-session cost
   agents/                agent names, watch triggers, prompt templates
-  state/                 watches and panel sizes on disk
+  state/                 watches, review queue and panel sizes on disk
   ui/                    Bubble Tea model, views, demo data
   utils/                 running CLIs, formatting, text layout
 docs/demo.tape           recording script for docs/demo.gif

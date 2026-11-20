@@ -24,8 +24,13 @@ func Name(p github.PR) string {
 	if p.Mine {
 		return name("fix", p.RepoName, p.Number)
 	}
-	return name("rev", p.RepoName, p.Number)
+	return name(reviewPrefix, p.RepoName, p.Number)
 }
+
+const reviewPrefix = "rev"
+
+// IsReview reports whether a herdr agent name is one cutie gave a review agent.
+func IsReview(agentName string) bool { return strings.HasPrefix(agentName, reviewPrefix+"-") }
 
 // IssueName is the herdr agent name for an issue, e.g. "iss-my-service-7".
 func IssueName(i github.Issue) string { return name("iss", i.RepoName, i.Number) }
@@ -52,7 +57,9 @@ func TabLabel(p github.PR) string {
 // IssueTabLabel is the herdr tab label used for an issue inside its repo workspace.
 func IssueTabLabel(i github.Issue) string { return fmt.Sprintf("issue #%d", i.Number) }
 
-// Baseline is the value a watcher compares against to detect new activity.
+// Baseline is the value a watcher compares against to detect new activity. For a PR
+// you review it marks a re-request: your last review's time while GitHub asks you to
+// review again, else empty. Each review you submit gives the next re-request a new value.
 func Baseline(p github.PR) string {
 	if p.Mine {
 		if p.LastFeedback.IsZero() {
@@ -60,17 +67,20 @@ func Baseline(p github.PR) string {
 		}
 		return p.LastFeedback.UTC().Format(time.RFC3339)
 	}
-	return p.HeadOID
+	if p.Status != github.StatusReRequested {
+		return ""
+	}
+	return p.MyLastReview.UTC().Format(time.RFC3339)
 }
 
 // Triggered reports whether the PR has activity newer than the watch baseline:
-// new reviewer feedback on your PR, or new commits on a PR you review.
+// new reviewer feedback on your PR, or a new re-request on a PR you review.
 func Triggered(p github.PR, baseline string) bool {
 	cur := Baseline(p)
 	if p.Mine {
 		return cur != "" && cur > baseline // RFC3339 UTC strings sort chronologically
 	}
-	return cur != baseline
+	return cur != "" && cur != baseline
 }
 
 //go:embed prompts/*.md

@@ -1,4 +1,4 @@
-// Package state keeps cutie's files: watched PRs and panel sizes.
+// Package state keeps cutie's files: watched PRs, the review queue and panel sizes.
 package state
 
 import (
@@ -58,6 +58,16 @@ func LoadWatches() (Watches, error) {
 }
 
 func (w Watches) Save() error { return saveState("watches.json", w) }
+
+// Queue is the PR keys waiting for a review agent, first in line first.
+type Queue []string
+
+func LoadQueue() (Queue, error) {
+	var q Queue
+	return q, loadState("queue.json", &q)
+}
+
+func (q Queue) Save() error { return saveState("queue.json", q) }
 
 // Sizes are the panel proportions set by dragging their borders.
 type Sizes struct {

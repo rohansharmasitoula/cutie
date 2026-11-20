@@ -36,7 +36,8 @@ var (
 		github.StatusNeedsWork:       cBad,
 		github.StatusApproved:        cGood,
 		github.StatusToReview:        cPurple,
-		github.StatusReviewedUpdated: cBad,
+		github.StatusReRequested:     cBad,
+		github.StatusReviewedUpdated: cWarn,
 		github.StatusReviewed:        cDim,
 	}
 	agentColor = map[string]lipgloss.Color{
@@ -274,8 +275,15 @@ func (m model) headerBar() string {
 	if n := counts["blocked"]; n > 0 {
 		parts = append(parts, bad.Bold(true).Render(fmt.Sprintf("▲ %d need you", n)))
 	}
+	if n := len(m.queue); n > 0 {
+		parts = append(parts, warn.Render(fmt.Sprintf("⧗ %d queued", n)))
+	}
 	if m.paused {
-		parts = append(parts, bad.Render("⏸ watchers paused"))
+		what := "watchers"
+		if len(m.queue) > 0 {
+			what = "watchers and queue"
+		}
+		parts = append(parts, bad.Render("⏸ "+what+" paused"))
 	}
 	right := dim.Render("⟳ refreshing")
 	if !m.loading && !m.refreshed.IsZero() {
@@ -302,7 +310,7 @@ func (m model) footer() string {
 			line1 = dim.Render(" " + m.status)
 		}
 	}
-	keys := " enter agent · w watch · p prompt · x close agent · o open · tab mine/review/issues · / filter · s sort · g group · b bots · d drafts · space fold · R force · drag borders to resize · = reset · ? help · q quit"
+	keys := " enter agent · a queue review · w watch · p prompt · x close agent · o open · tab mine/review/issues · / filter · s sort · g group · b bots · d drafts · space fold · R force · drag borders to resize · = reset · ? help · q quit"
 	return utils.Fit(line1, m.width) + "\n" + dim.Render(utils.Fit(keys, m.width))
 }
 
@@ -402,6 +410,9 @@ func (m model) renderItem(it item, selected bool, w int) string {
 	}
 
 	right := m.agentCell(prWork(p))
+	if pos := m.queuePos(p.Key()); pos > 0 {
+		right = append(right, warn.Render(fmt.Sprintf("⧗ queue %d", pos)))
+	}
 	if n := p.Open(); n > 0 {
 		right = append(right, bad.Render(fmt.Sprintf("%d open", n)))
 	}
@@ -506,6 +517,9 @@ func (m model) detail(w int) (string, []string) {
 	}
 	if _, ok := m.watches[p.Key()]; ok {
 		state += fg(cCyan, " · ◉ watching")
+	}
+	if pos := m.queuePos(p.Key()); pos > 0 {
+		state += warn.Render(fmt.Sprintf(" · ⧗ %d of %d in the review queue", pos, len(m.queue)))
 	}
 	add(state, "")
 
@@ -642,7 +656,7 @@ func (m model) repoSummary(repo string) []string {
 		}
 	}
 	var l []string
-	for _, s := range []github.Status{github.StatusNeedsWork, github.StatusReviewedUpdated, github.StatusToReview, github.StatusInReview, github.StatusApproved, github.StatusReviewed, github.StatusDraft} {
+	for _, s := range []github.Status{github.StatusNeedsWork, github.StatusReRequested, github.StatusToReview, github.StatusInReview, github.StatusApproved, github.StatusReviewedUpdated, github.StatusReviewed, github.StatusDraft} {
 		if counts[s] > 0 {
 			l = append(l, fmt.Sprintf("%s %d", utils.Fit(fg(statusColor[s], s.Label()), 12), counts[s]))
 		}
@@ -660,7 +674,8 @@ func helpLines() []string {
 		{"enter", "jump to the row's agent, or start one"},
 		{"p", "send a prompt to the row's agent"},
 		{"x x", "close the row's agent pane (asks first)"},
-		{"w", "watch a PR: wake the agent on new feedback / commits"},
+		{"w", "watch a PR: wake the agent on new feedback / a re-request"},
+		{"a", "queue a review: agents review one PR at a time (again to unqueue)"},
 		{"o", "open the PR or issue in the browser"},
 		{"tab, 1, 2, 3", "Mine / Review / Issues"},
 		{"/", "filter by text (esc clears)"},

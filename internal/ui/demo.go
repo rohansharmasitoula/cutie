@@ -43,7 +43,7 @@ func demoPRs() (mine, review []github.PR) {
 	mine = []github.PR{auth, stack1, stack2, web, draft}
 
 	r1 := pr("web", 240, "Feat | Settings | team roles page", "maya", "maya/240-roles", "main", github.StatusToReview, false)
-	r2 := pr("api", 409, "Perf | Search | batch index writes", "leo", "leo/409-batch-index", "main", github.StatusReviewedUpdated, false)
+	r2 := pr("api", 409, "Perf | Search | batch index writes", "leo", "leo/409-batch-index", "main", github.StatusReRequested, false)
 	r2.Threads = []github.Thread{{Author: "you", Path: "search/index.go", Line: 51, Body: "the batch size should come from config"}}
 	r3 := pr("infra", 102, "Feat | Terraform | staging Redis cluster", "sam", "sam/102-redis", "main", github.StatusReviewed, false)
 	review = []github.PR{r1, r2, r3}

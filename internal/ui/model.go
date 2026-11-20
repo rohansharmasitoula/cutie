@@ -25,6 +25,9 @@ const (
 	limitPollInterval = 60 * time.Second
 	statsPollInterval = 5 * time.Minute
 	tailLines         = 12
+	// queueSettle is how long the review queue waits after any agent start or prompt,
+	// so the agent list shows the new agent working before the next review is picked.
+	queueSettle = 15 * time.Second
 )
 
 // ---- messages ----
@@ -96,6 +99,9 @@ type model struct {
 	limits  []omp.Limit
 	stats   *omp.Stats
 	watches state.Watches
+	queue   state.Queue // review PRs waiting for the running review to finish
+	// queueAfter is the earliest time the queue may pick its next review.
+	queueAfter time.Time
 	// inflight marks PR and issue keys with an agent start or prompt running.
 	inflight map[string]bool
 	events   []Event
@@ -132,17 +138,18 @@ type model struct {
 	confirmClose string
 }
 
-func newModel(cfg config.Config, ps agents.Prompts, w state.Watches, s state.Sizes) model {
+func newModel(cfg config.Config, ps agents.Prompts, w state.Watches, q state.Queue, s state.Sizes) model {
 	in := textinput.New()
 	in.Prompt = ""
 	m := model{
-		cfg: cfg, prompts: ps, be: newBackend(cfg), watches: w, sizes: s,
+		cfg: cfg, prompts: ps, be: newBackend(cfg), watches: w, queue: q, sizes: s,
 		inflight: map[string]bool{}, byName: map[string]herdr.Agent{}, collapsed: map[string]bool{},
 		grouped: true, hideBots: true, loading: true, input: in,
 	}
-	if cfg.Demo { // never show or overwrite the user's real watches
+	if cfg.Demo { // never show or overwrite the user's real watches and queue
 		mine, _ := demoPRs()
 		m.watches = state.Watches{mine[0].Key(): agents.Baseline(mine[0]), mine[1].Key(): agents.Baseline(mine[1])}
+		m.queue = nil
 		m.events = demoEvents()
 	}
 	return m
@@ -651,6 +658,97 @@ func (m *model) runWatchers() []tea.Cmd {
 	return cmds
 }
 
+// runQueue starts the next queued review once no review agent is starting, working or
+// waiting for you, so reviews run one at a time. It holds while the spending guard
+// pauses watchers. Queued PRs that were merged, closed or no longer need a review
+// leave the queue with an Activity line.
+func (m *model) runQueue() tea.Cmd {
+	if len(m.queue) == 0 || m.refreshed.IsZero() || m.paused || time.Now().Before(m.queueAfter) {
+		return nil
+	}
+	for _, a := range m.agents {
+		if agents.IsReview(a.Name) && (a.Status == "working" || a.Status == "blocked") {
+			return nil
+		}
+	}
+	byKey := map[string]github.PR{}
+	for _, p := range m.review {
+		if m.inflight[p.Key()] {
+			return nil
+		}
+		byKey[p.Key()] = p
+	}
+	defer m.save("review queue", m.queue.Save, "")
+	for len(m.queue) > 0 {
+		key := m.queue[0]
+		m.queue = m.queue[1:]
+		p, ok := byKey[key]
+		if !ok {
+			m.addEvents(Event{time.Now(), EventInfo, key + " left the review queue: merged or closed"})
+			continue
+		}
+		if !p.Status.Actionable() {
+			m.addEvents(Event{time.Now(), EventInfo, ref(p) + " left the review queue: " + p.Status.Label()})
+			continue
+		}
+		name, _, live := m.agentFor(p)
+		note := fmt.Sprintf("review queue started %s (%d left)", name, len(m.queue))
+		var cmd tea.Cmd
+		switch {
+		case !live:
+			cmd = m.startCmd(p, note)
+		case p.Status == github.StatusReRequested:
+			cmd = m.followUpCmd(p, name, note)
+		default: // an idle agent from an earlier session: hand it the review
+			prompt, err := m.prompts.Start(p)
+			if err != nil {
+				return func() tea.Msg { return dispatchMsg{key: key, err: err} }
+			}
+			cmd = m.promptCmd(key, name, prompt, note)
+		}
+		m.inflight[key] = true
+		return cmd
+	}
+	return nil
+}
+
+// toggleQueue adds the selected review PR to the end of the review queue, or takes it out.
+func (m model) toggleQueue() model {
+	it := m.selectedItem()
+	if it == nil || it.header {
+		return m
+	}
+	if it.pr == nil || it.pr.Mine {
+		m.setStatus("the queue is for PRs you review; enter starts an agent here", false)
+		return m
+	}
+	p := *it.pr
+	for i, k := range m.queue {
+		if k == p.Key() {
+			m.queue = append(m.queue[:i:i], m.queue[i+1:]...)
+			m.save("review queue", m.queue.Save, fmt.Sprintf("took #%d out of the review queue", p.Number))
+			return m
+		}
+	}
+	if !p.Status.Actionable() {
+		m.setStatus(fmt.Sprintf("#%d is %s: nothing for an agent to do", p.Number, p.Status.Label()), false)
+		return m
+	}
+	m.queue = append(m.queue, p.Key())
+	m.save("review queue", m.queue.Save, fmt.Sprintf("queued #%d for review (%d in queue)", p.Number, len(m.queue)))
+	return m
+}
+
+// queuePos is the PR's 1-based place in the review queue, or 0 when it is not queued.
+func (m model) queuePos(key string) int {
+	for i, k := range m.queue {
+		if k == key {
+			return i + 1
+		}
+	}
+	return 0
+}
+
 func (m model) activate() (model, tea.Cmd) {
 	it := m.selectedItem()
 	if it == nil {
@@ -707,7 +805,7 @@ func (m model) toggleWatch() model {
 		m.watches[p.Key()] = agents.Baseline(*p)
 		what := "new review feedback"
 		if !p.Mine {
-			what = "new commits"
+			what = "a re-request"
 		}
 		m.setStatus(fmt.Sprintf("watching #%d for %s", p.Number, what), false)
 	}
@@ -816,6 +914,7 @@ func (m model) update(msg tea.Msg) (model, tea.Cmd) {
 				m.tail, m.tailFor = nil, ""
 			}
 		}
+		cmds = append(cmds, m.runQueue()) // before the return, which copies m
 		return m, tea.Batch(append(cmds, m.tailCmd())...)
 
 	case tailMsg:
@@ -869,6 +968,7 @@ func (m model) update(msg tea.Msg) (model, tea.Cmd) {
 
 	case dispatchMsg:
 		delete(m.inflight, msg.key)
+		m.queueAfter = time.Now().Add(queueSettle)
 		if msg.err != nil {
 			m.setStatus(msg.err.Error(), true)
 		} else {
@@ -1037,6 +1137,8 @@ func (m model) updateKey(msg tea.KeyMsg) (model, tea.Cmd) {
 		}
 	case "w":
 		m = m.toggleWatch()
+	case "a":
+		m = m.toggleQueue()
 	case "o":
 		if w, ok := m.selectedWork(); ok {
 			if err := m.be.Open(w.url); err != nil {
@@ -1103,7 +1205,7 @@ func (m model) updateKey(msg tea.KeyMsg) (model, tea.Cmd) {
 }
 
 // Run shows the dashboard until the user quits.
-func Run(cfg config.Config, ps agents.Prompts, w state.Watches, s state.Sizes) error {
-	_, err := tea.NewProgram(newModel(cfg, ps, w, s), tea.WithAltScreen(), tea.WithMouseCellMotion()).Run()
+func Run(cfg config.Config, ps agents.Prompts, w state.Watches, q state.Queue, s state.Sizes) error {
+	_, err := tea.NewProgram(newModel(cfg, ps, w, q, s), tea.WithAltScreen(), tea.WithMouseCellMotion()).Run()
 	return err
 }
