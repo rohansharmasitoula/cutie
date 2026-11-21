@@ -33,7 +33,7 @@ func demoPRs() (mine, review []github.PR) {
 	auth.Threads = []github.Thread{
 		{Author: "maya", Path: "auth/refresh.go", Line: 88, Body: "concern: the old token stays valid until expiry, so a stolen one keeps working after rotation."},
 		{Author: "maya", Path: "auth/refresh_test.go", Line: 12, Body: "suggestion: add a test that replays a rotated token and expects 401."},
-		{Author: "leo", Path: "docs/auth.md", Line: 40, Body: "question: should the docs mention the new grace window?", Replied: true},
+		{Author: "leo", Path: "docs/auth.md", Line: 40, Body: "question: should the docs mention the new grace window?", OnReviewer: true},
 	}
 	stack1 := pr("api", 418, "Feat | Billing | usage meter read model", "you", "you/418-usage-meter", "main", github.StatusInReview, true)
 	stack2 := pr("api", 421, "Feat | Billing | invoices read from the usage meter", "you", "you/421-invoices", "you/418-usage-meter", github.StatusInReview, true)

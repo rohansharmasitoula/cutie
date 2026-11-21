@@ -102,6 +102,7 @@ type model struct {
 	queue   state.Queue // review PRs waiting for the running review to finish
 	// queueAfter is the earliest time the queue may pick its next review.
 	queueAfter time.Time
+	modes      state.Modes // review PR key → "autopilot"; others are copilot
 	// inflight marks PR and issue keys with an agent start or prompt running.
 	inflight map[string]bool
 	events   []Event
@@ -138,21 +139,83 @@ type model struct {
 	confirmClose string
 }
 
-func newModel(cfg config.Config, ps agents.Prompts, w state.Watches, q state.Queue, s state.Sizes) model {
+func newModel(cfg config.Config, ps agents.Prompts, w state.Watches, q state.Queue, md state.Modes, s state.Sizes) model {
 	in := textinput.New()
 	in.Prompt = ""
 	m := model{
-		cfg: cfg, prompts: ps, be: newBackend(cfg), watches: w, queue: q, sizes: s,
+		cfg: cfg, prompts: ps, be: newBackend(cfg), watches: w, queue: q, modes: md, sizes: s,
 		inflight: map[string]bool{}, byName: map[string]herdr.Agent{}, collapsed: map[string]bool{},
 		grouped: true, hideBots: true, loading: true, input: in,
 	}
-	if cfg.Demo { // never show or overwrite the user's real watches and queue
-		mine, _ := demoPRs()
+	if cfg.Demo { // never show or overwrite the user's real watches, queue and modes
+		mine, review := demoPRs()
 		m.watches = state.Watches{mine[0].Key(): agents.Baseline(mine[0]), mine[1].Key(): agents.Baseline(mine[1])}
 		m.queue = nil
+		m.modes = state.Modes{review[1].Key(): string(agents.Autopilot)}
 		m.events = demoEvents()
 	}
 	return m
+}
+
+// modeFor is PR p's review mode: copilot unless you switched it to autopilot.
+func (m model) modeFor(p github.PR) agents.ReviewMode {
+	if agents.ReviewMode(m.modes[p.Key()]) == agents.Autopilot {
+		return agents.Autopilot
+	}
+	return agents.Copilot
+}
+
+// toggleMode switches the selected review PR between copilot and autopilot, queued or
+// not. A live review agent, even one mid-review, is told at once; herdr only refuses
+// an agent that is waiting on a question of its own.
+func (m model) toggleMode() (model, tea.Cmd) {
+	p := m.selectedPR()
+	if p == nil || p.Mine {
+		m.setStatus("review mode is for PRs you review; your own PRs and issues never post", false)
+		return m, nil
+	}
+	next := agents.Autopilot
+	if m.modeFor(*p) == agents.Autopilot {
+		next = agents.Copilot
+		delete(m.modes, p.Key())
+	} else {
+		m.modes[p.Key()] = string(next)
+	}
+	what := map[agents.ReviewMode]string{
+		agents.Autopilot: "posts its review with a verdict and opens follow-up issues by itself",
+		agents.Copilot:   "drafts the review and follow-up issues and waits for your OK",
+	}[next]
+	m.addEvents(Event{time.Now(), EventInfo, fmt.Sprintf("%s → %s", ref(*p), next)})
+	name, a, live := m.agentFor(*p)
+	if !live {
+		m.save("review modes", m.modes.Save, fmt.Sprintf("#%d → %s: its reviewer %s", p.Number, next, what))
+		return m, nil
+	}
+	m.save("review modes", m.modes.Save, "")
+	if a.Status == "blocked" {
+		m.setStatus(fmt.Sprintf("#%d → %s, but %s is waiting for you: answer it in its pane, then press m twice to tell it", p.Number, next, name), true)
+		return m, nil
+	}
+	m.setStatus(fmt.Sprintf("telling %s: %s…", name, next), false)
+	return m, m.promptCmd(p.Key(), name, agents.ModeChange(next), fmt.Sprintf("%s switched to %s", name, next))
+}
+
+// pruneModes forgets the modes of PRs that are no longer open.
+func (m *model) pruneModes() {
+	open := map[string]bool{}
+	for _, p := range m.review {
+		open[p.Key()] = true
+	}
+	changed := false
+	for k := range m.modes {
+		if !open[k] {
+			delete(m.modes, k)
+			changed = true
+		}
+	}
+	if changed {
+		m.save("review modes", m.modes.Save, "")
+	}
 }
 
 // Init loads everything once and starts one tick loop per data source. Ticks are only
@@ -537,7 +600,7 @@ func (m model) agentFor(p github.PR) (string, herdr.Agent, bool) {
 
 // startCmd finds or creates the PR's pane and starts an agent there with the start prompt.
 func (m model) startCmd(p github.PR, note string) tea.Cmd {
-	prompt, err := m.prompts.Start(p)
+	prompt, err := m.prompts.Start(p, m.modeFor(p))
 	return m.startWorkCmd(prWork(p), prompt, err, note)
 }
 
@@ -557,7 +620,7 @@ func (m model) startWorkCmd(w work, prompt string, promptErr error, note string)
 
 // followUpCmd sends the PR's live agent the follow-up prompt.
 func (m model) followUpCmd(p github.PR, name, note string) tea.Cmd {
-	prompt, err := m.prompts.FollowUp(p)
+	prompt, err := m.prompts.FollowUp(p, m.modeFor(p))
 	if err != nil {
 		return func() tea.Msg { return dispatchMsg{key: p.Key(), err: err} }
 	}
@@ -579,13 +642,17 @@ func (m model) notifyCmd(title, body string) tea.Cmd {
 	}
 }
 
+// fiveHour is the 5 hour window the spending guard watches. With several Claude accounts
+// logged in, it is the one with the most room left, since agents can still run on it.
 func (m model) fiveHour() (omp.Limit, bool) {
+	var best omp.Limit
+	found := false
 	for _, l := range m.limits {
-		if l.Window == "5h" {
-			return l, true
+		if l.Window == "5h" && (!found || l.Used < best.Used) {
+			best, found = l, true
 		}
 	}
-	return omp.Limit{}, false
+	return best, found
 }
 
 // runWatchers wakes or starts agents for watched PRs with new activity. A watch whose
@@ -595,7 +662,7 @@ func (m *model) runWatchers() []tea.Cmd {
 	var cmds []tea.Cmd
 	open := map[string]bool{}
 	changed := false
-	checked, quiet, waiting, held := 0, 0, 0, 0
+	checked, quiet, waiting, held, queued := 0, 0, 0, 0, 0
 	for _, p := range m.allPRs() {
 		open[p.Key()] = true
 		baseline, watched := m.watches[p.Key()]
@@ -605,6 +672,19 @@ func (m *model) runWatchers() []tea.Cmd {
 		checked++
 		if m.inflight[p.Key()] || !agents.Triggered(p, baseline) {
 			quiet++
+			continue
+		}
+		// A re-request on a PR you review joins the review queue, which runs reviews
+		// one at a time; the new baseline marks this re-request as handled.
+		if !p.Mine {
+			if m.queuePos(p.Key()) == 0 {
+				m.queue = append(m.queue, p.Key())
+				m.save("review queue", m.queue.Save, "")
+				m.addEvents(Event{time.Now(), EventInfo, fmt.Sprintf("watcher queued %s (%d in queue)", ref(p), len(m.queue))})
+			}
+			queued++
+			m.watches[p.Key()] = agents.Baseline(p)
+			changed = true
 			continue
 		}
 		if m.paused {
@@ -632,8 +712,11 @@ func (m *model) runWatchers() []tea.Cmd {
 	// Every run leaves a line, so a check that finds nothing is visible too.
 	if checked > 0 {
 		parts := []string{fmt.Sprintf("watchers checked %d PR(s)", checked)}
-		if fired := checked - quiet - waiting - held; fired > 0 {
+		if fired := checked - quiet - waiting - held - queued; fired > 0 {
 			parts = append(parts, fmt.Sprintf("%d woken", fired))
+		}
+		if queued > 0 {
+			parts = append(parts, fmt.Sprintf("%d sent to the review queue", queued))
 		}
 		if quiet > 0 {
 			parts = append(parts, fmt.Sprintf("%d with nothing new from reviewers", quiet))
@@ -716,7 +799,7 @@ func (m *model) runQueue() tea.Cmd {
 		case p.Status == github.StatusReRequested:
 			cmd = m.followUpCmd(p, name, note)
 		default: // an idle agent from an earlier session: hand it the review
-			prompt, err := m.prompts.Start(p)
+			prompt, err := m.prompts.Start(p, m.modeFor(p))
 			if err != nil {
 				return func() tea.Msg { return dispatchMsg{key: key, err: err} }
 			}
@@ -896,6 +979,7 @@ func (m model) update(msg tea.Msg) (model, tea.Cmd) {
 			m.login, m.mine, m.review, m.issues = msg.snap.Login, msg.snap.Mine, msg.snap.Review, msg.snap.Issues
 		}
 		m.refreshed = time.Now()
+		m.pruneModes()
 		// The list refreshes every minute; watchers act at most every watchGap, so
 		// agents are woken once per batch of feedback instead of per comment.
 		if m.agents != nil && time.Since(m.watchedAt) >= m.cfg.WatchGap {
@@ -1153,6 +1237,8 @@ func (m model) updateKey(msg tea.KeyMsg) (model, tea.Cmd) {
 		}
 	case "w":
 		m = m.toggleWatch()
+	case "m":
+		return m.toggleMode()
 	case "a":
 		m = m.toggleQueue()
 	case "o":
@@ -1221,7 +1307,7 @@ func (m model) updateKey(msg tea.KeyMsg) (model, tea.Cmd) {
 }
 
 // Run shows the dashboard until the user quits.
-func Run(cfg config.Config, ps agents.Prompts, w state.Watches, q state.Queue, s state.Sizes) error {
-	_, err := tea.NewProgram(newModel(cfg, ps, w, q, s), tea.WithAltScreen(), tea.WithMouseCellMotion()).Run()
+func Run(cfg config.Config, ps agents.Prompts, w state.Watches, q state.Queue, md state.Modes, s state.Sizes) error {
+	_, err := tea.NewProgram(newModel(cfg, ps, w, q, md, s), tea.WithAltScreen(), tea.WithMouseCellMotion()).Run()
 	return err
 }

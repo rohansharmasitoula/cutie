@@ -1,4 +1,4 @@
-// Package state keeps cutie's files: watched PRs, the review queue and panel sizes.
+// Package state keeps cutie's files: watched PRs, the review queue, review modes and panel sizes.
 package state
 
 import (
@@ -68,6 +68,16 @@ func LoadQueue() (Queue, error) {
 }
 
 func (q Queue) Save() error { return saveState("queue.json", q) }
+
+// Modes maps a review PR's key → its review mode ("autopilot"); PRs not listed use copilot.
+type Modes map[string]string
+
+func LoadModes() (Modes, error) {
+	m := Modes{}
+	return m, loadState("modes.json", &m)
+}
+
+func (m Modes) Save() error { return saveState("modes.json", m) }
 
 // Sizes are the panel proportions set by dragging their borders.
 type Sizes struct {

@@ -38,9 +38,13 @@ func run() error {
 	if err != nil {
 		return utils.Wrap("loading the review queue", err)
 	}
+	modes, err := state.LoadModes()
+	if err != nil {
+		return utils.Wrap("loading review modes", err)
+	}
 	sizes, err := state.LoadSizes()
 	if err != nil {
 		return utils.Wrap("loading sizes", err)
 	}
-	return ui.Run(cfg, prompts, watches, queue, sizes)
+	return ui.Run(cfg, prompts, watches, queue, modes, sizes)
 }

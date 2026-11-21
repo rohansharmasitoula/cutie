@@ -97,9 +97,35 @@ type Prompts struct {
 }
 
 // PromptData is what a PR prompt template can use, e.g. {{.URL}} or {{.Branch}}.
+// Posting is the review mode's rule on posting to GitHub, for the review prompts.
 type PromptData struct {
-	URL, Repo, Branch, Base, Author, HeadShort string
-	Number                                     int
+	URL, Repo, Branch, Base, Author, HeadShort, Posting string
+	Number                                              int
+}
+
+// ReviewMode is how a review agent treats GitHub, chosen per PR: copilot drafts and
+// waits for your approval, autopilot acts by itself.
+type ReviewMode string
+
+const (
+	Copilot   ReviewMode = "copilot"
+	Autopilot ReviewMode = "autopilot"
+)
+
+// Posting is the instruction a review prompt carries as {{.Posting}}: whether the agent
+// posts the review and opens the follow-up issues its reviewer calls for by itself, or
+// waits for your approval first. What to post and where is the reviewer's call.
+func (r ReviewMode) Posting() string {
+	if r == Autopilot {
+		return "Autopilot: act without waiting for me. Post the review to GitHub with `gh` with the verdict the reviewer gives (approve, request changes or comment), and open the follow-up issues the reviewer calls for, in the repos it names. Then report here what you posted and the issues you opened."
+	}
+	return "Copilot: draft the review, the reviewer's verdict and the follow-up issues it calls for here, and wait for my approval. Post the review and open the issues with `gh` only after I approve them in this pane, with any edits I ask for."
+}
+
+// ModeChange is sent to a PR's live review agent, working or idle, when you switch its
+// mode, so the switch also applies to a review in progress.
+func ModeChange(r ReviewMode) string {
+	return "The review mode for this PR changed; this replaces the earlier posting instructions. " + r.Posting()
 }
 
 // IssueData is what the issue prompt template can use, e.g. {{.URL}} or {{.Title}}.
@@ -120,6 +146,11 @@ func LoadPrompts(dir string) (Prompts, error) {
 		if err != nil {
 			return ps, err
 		}
+		// Review prompts must carry the mode's posting rule, or autopilot and copilot
+		// would both get whatever the file says about posting.
+		if strings.HasPrefix(name, "review-") && !strings.Contains(string(src), "{{.Posting}}") {
+			return ps, fmt.Errorf("prompt %s: must contain {{.Posting}}, the review mode's rule on posting to GitHub (replace any \"do not post\" sentence with it)", filepath.Join(dir, file))
+		}
 		t, err := template.New(name).Option("missingkey=error").Parse(strings.TrimSpace(string(src)))
 		if err != nil {
 			return ps, fmt.Errorf("prompt %s: %w", file, err)
@@ -129,13 +160,17 @@ func LoadPrompts(dir string) (Prompts, error) {
 	return ps, nil
 }
 
-// Start is the first message to a new agent for the PR.
-func (ps Prompts) Start(p github.PR) (string, error) { return ps.render(p, "start") }
+// Start is the first message to a new agent for the PR; mode applies to reviews.
+func (ps Prompts) Start(p github.PR, mode ReviewMode) (string, error) {
+	return ps.render(p, "start", mode)
+}
 
 // FollowUp is what a watcher sends the PR's existing agent when new activity arrives.
-func (ps Prompts) FollowUp(p github.PR) (string, error) { return ps.render(p, "followup") }
+func (ps Prompts) FollowUp(p github.PR, mode ReviewMode) (string, error) {
+	return ps.render(p, "followup", mode)
+}
 
-func (ps Prompts) render(p github.PR, stage string) (string, error) {
+func (ps Prompts) render(p github.PR, stage string, mode ReviewMode) (string, error) {
 	side := "review"
 	if p.Mine {
 		side = "fix"
@@ -146,6 +181,7 @@ func (ps Prompts) render(p github.PR, stage string) (string, error) {
 	}
 	return ps.execute(side+"-"+stage, PromptData{
 		URL: p.URL, Repo: p.Repo, Branch: p.Branch, Base: p.Base, Author: p.Author, HeadShort: head, Number: p.Number,
+		Posting: mode.Posting(),
 	})
 }
 

@@ -21,8 +21,9 @@ cutie lists your open PRs and the PRs waiting for your review, tells you which o
 | 🎯 **Only what needs you** | A PR is flagged when a reviewer is waiting on your reply or commented after your last push. Threads you've already answered stay quiet. |
 | ⚡ **An agent in one keystroke** | Press `enter` on a PR or an issue: cutie opens the repo in herdr, starts a coding agent in its own tab and hands it the work. Press it again to jump there. |
 | 👀 **See every agent at work** | Each agent's status, cost and latest output, right beside the PR's checks, reviewers and open threads. |
-| 🔔 **Watchers** | Watch a PR and its agent wakes up by itself when reviewers reply to yours, or when the author re-requests your review on one you're reviewing. |
-| 💸 **Claude usage, always visible** | Your 5 hour and 7 day limits with reset timers, 24h spend, tokens per hour and model split. Watchers pause before you run out. |
+| 🔔 **Watchers** | Watch a PR and its agent wakes up by itself when reviewers reply to yours; when the author re-requests your review on one you're reviewing, it joins the review queue. |
+| ✈️ **Copilot or autopilot reviews** | Per PR you review: the agent drafts the review and waits for your OK, or posts it with a verdict and opens follow-up issues by itself. `m` switches, even mid-review. |
+| 💸 **Claude usage, always visible** | Your 5 hour and 7 day limits with reset timers, 24h spend, tokens per hour and model split. Watchers and the review queue pause before you run out. |
 | 🪶 **Light on GitHub** | One tiny query a minute; full details only for PRs that changed, so your API budget lasts. |
 | 🖱️ **Mouse or keyboard** | Click rows, drag borders to resize panels, filter, sort and fold repos. |
 
@@ -71,12 +72,12 @@ CUTIE_DEMO=1 cutie
 | `CUTIE_AGENT` | `omp` | herdr agent kind to start: `omp`, `claude`, `codex`, … |
 | `CUTIE_INTERVAL` | `60` | Seconds between GitHub refreshes (minimum 10) |
 | `CUTIE_WATCH_MINUTES` | `30` | Minutes between watcher checks |
-| `CUTIE_GUARD` | `85` | Pause watchers when the Claude 5 hour window passes this percentage |
+| `CUTIE_GUARD` | `85` | Pause watchers and the review queue when the Claude 5 hour window passes this percentage (with several Claude accounts in omp, the one with the most room counts) |
 | `CUTIE_DEMO` | unset | `1` shows made-up data and calls nothing |
 
 ### Prompts
 
-cutie sends an agent one of four messages. The built-in ones work with any agent: they ask it to read the PR with `gh`, fix or review it, commit locally, and **never push or post to GitHub**.
+cutie sends an agent one of five messages. The built-in ones work with any agent: they ask it to read the PR or issue with `gh`, then fix, review or build it. Fix and issue agents commit locally and **never push or post to GitHub**; review agents post only as the review mode allows (see below).
 
 To use your own, put a file with the same name in `~/Library/Application Support/cutie/prompts/` (macOS) or `~/.config/cutie/prompts/` (Linux):
 
@@ -88,13 +89,26 @@ To use your own, put a file with the same name in `~/Library/Application Support
 | `review-followup.md` | Re-reviewing: a watcher sees a re-request, or the queue reaches a re-requested PR whose agent is still open |
 | `issue-start.md` | Starting an agent on an issue assigned to you |
 
-PR prompts are Go templates with `{{.URL}}`, `{{.Repo}}`, `{{.Number}}`, `{{.Branch}}`, `{{.Base}}`, `{{.Author}}` and `{{.HeadShort}}`; the issue prompt has `{{.URL}}`, `{{.Repo}}`, `{{.Number}}`, `{{.Title}}` and `{{.Author}}`. For example, to hand the work to your own subagent:
+PR prompts are Go templates with `{{.URL}}`, `{{.Repo}}`, `{{.Number}}`, `{{.Branch}}`, `{{.Base}}`, `{{.Author}}`, `{{.HeadShort}}` and `{{.Posting}}`; the issue prompt has `{{.URL}}`, `{{.Repo}}`, `{{.Number}}`, `{{.Title}}` and `{{.Author}}`. The review prompts must contain `{{.Posting}}`, the review mode's rule on posting, and cutie refuses to start without it. For example, to hand the work to your own subagent:
 
 ```text
 Spawn an `orchestrator` task agent to address the review feedback on {{.URL}} (branch {{.Branch}}). Commit locally; do not push.
 ```
 
 The defaults are in [`internal/agents/prompts`](internal/agents/prompts).
+
+### Review mode
+
+Each PR you review has its own mode. `m` on its row switches it, whether the PR is queued, idle or mid-review. The row shows `✋ co` or `✈ auto`, and the top bar counts the PRs on autopilot.
+
+| Mode | What the review agent does |
+|---|---|
+| ✋ copilot (default) | Drafts the review, the reviewer's verdict (approve, request changes or comment) and the follow-up issues it calls for, then waits; it posts and opens issues only after you approve in its pane |
+| ✈ autopilot | Posts the review with the reviewer's verdict and opens the follow-up issues it calls for, in the repos it names, without asking; then reports what it did |
+
+What to post and where follow-up issues go is the reviewer's call; the mode only decides whether it waits for you.
+
+The mode goes out with each review prompt (`enter`, the queue, watchers). Switching a PR whose review agent is running sends that agent the new rule at once, even mid-review; an agent waiting on a question of its own has to be answered first. Modes are kept in `modes.json` and forgotten when the PR is merged or closed.
 
 ## Keys
 
@@ -106,6 +120,7 @@ The defaults are in [`internal/agents/prompts`](internal/agents/prompts).
 | `x` `x` | Close the row's agent pane (the first `x` asks) |
 | `w` | Watch or unwatch the PR |
 | `a` | Add the PR you review to the review queue, or take it out |
+| `m` | Switch the PR's review mode: copilot ↔ autopilot (also mid-review) |
 | `o` | Open the PR or issue in the browser |
 | `tab` / `1` / `2` / `3` | Mine / Review / Issues |
 | `/` | Filter (`esc` clears) |
@@ -124,7 +139,7 @@ The defaults are in [`internal/agents/prompts`](internal/agents/prompts).
 
 | Tab | Status | Meaning |
 |---|---|---|
-| Mine | `needs work` | A review thread waits on your reply, or a reviewer wrote after your last push |
+| Mine | `needs work` | A review thread waits on your reply, or a reviewer wrote after your last push. Re-requesting a reviewer hands their threads and feedback back to them |
 | Mine | `in review` / `approved` / `draft` | As on GitHub |
 | Review | `to review` | You are requested as a reviewer and haven't reviewed it |
 | Review | `re-review` | You reviewed it and the author requested your review again |
@@ -141,17 +156,17 @@ For `owner/repo#N`, cutie uses the herdr workspace labelled `repo` (created in t
 
 ### Watchers
 
-`w` remembers the PR's current state. Every `CUTIE_WATCH_MINUTES`, a watched PR with newer activity gets its agent woken with the follow-up prompt, or a new agent started. Newer activity is review feedback on your PR, or a re-request on a PR you review (pushes alone don't count). A watcher waits while its agent is working or waiting for you, and all watchers pause above `CUTIE_GUARD`. Watches end when the PR is merged or closed, and only run while cutie is open. The Activity panel logs every check.
+`w` remembers the PR's current state. Every `CUTIE_WATCH_MINUTES`, a watched PR with newer activity is acted on. On your PR, newer activity is review feedback: its agent is woken with the follow-up prompt, or a new agent started, and the watcher waits while that agent is working or waiting for you. On a PR you review, it is a re-request (pushes alone don't count): the PR joins the end of the review queue, unless it is already in it, so watched reviews also run one at a time. All watchers pause above `CUTIE_GUARD`. Watches end when the PR is merged or closed, and only run while cutie is open. The Activity panel logs every check.
 
 herdr notifications fire when an agent starts waiting for you and when a watched PR of yours gets new feedback.
 
 ### Review queue
 
-`a` on a PR in the Review tab puts it at the end of the review queue instead of starting an agent now. The queue starts one review at a time: the next PR gets its agent only when no review agent is starting, working or waiting for you. A PR that was merged, closed or no longer needs your review leaves the queue when its turn comes. The queue holds above `CUTIE_GUARD`, like the watchers, survives restarts, and only runs while cutie is open. The top of the Agents panel lists the queue in order and says what it is waiting for.
+`a` on a PR in the Review tab puts it at the end of the review queue instead of starting an agent now; a watcher does the same when a watched review PR is re-requested. The queue starts one review at a time: the next PR gets its agent only when no review agent is starting, working or waiting for you. A PR that was merged, closed or no longer needs your review leaves the queue when its turn comes. The queue holds above `CUTIE_GUARD`, like the watchers, survives restarts, and only runs while cutie is open. The top of the Agents panel lists the queue in order and says what it is waiting for.
 
 ### Files
 
-cutie keeps `watches.json`, `queue.json`, `sizes.json` and `prompts/` in `~/Library/Application Support/cutie/` (macOS) or `~/.config/cutie/` (Linux).
+cutie keeps `watches.json`, `queue.json`, `modes.json`, `sizes.json` and `prompts/` in `~/Library/Application Support/cutie/` (macOS) or `~/.config/cutie/` (Linux).
 
 ## Project layout
 
@@ -163,7 +178,7 @@ internal/
   herdr/                 workspaces, panes, agents, notifications
   omp/                   Claude plan windows, 24h stats, per-session cost
   agents/                agent names, watch triggers, prompt templates
-  state/                 watches, review queue and panel sizes on disk
+  state/                 watches, review queue, review modes and panel sizes on disk
   ui/                    Bubble Tea model, views, demo data
   utils/                 running CLIs, formatting, text layout
 docs/demo.tape           recording script for docs/demo.gif
