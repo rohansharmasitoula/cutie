@@ -10,7 +10,7 @@ Thanks for helping. Bug reports, ideas and pull requests are all welcome.
 
 ## Set up
 
-You need Go 1.24+ (see `go.mod`). `gh` and herdr are only needed to run cutie against real PRs; demo mode needs neither.
+You need Go 1.26+ (see `go.mod`). `gh` and herdr are only needed to run cutie against real PRs; demo mode needs neither.
 
 ```sh
 git clone https://github.com/rohansharmasitoula/cutie
