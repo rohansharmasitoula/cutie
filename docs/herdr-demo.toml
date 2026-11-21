@@ -1,0 +1,19 @@
+# herdr settings for recording docs/demo.gif (docs/demo.tape sets HERDR_CONFIG_PATH to
+# this file), so the recording doesn't depend on your own herdr config.
+onboarding = false
+
+[theme]
+name = "catppuccin"
+
+[terminal]
+default_shell = "/bin/bash"
+shell_mode = "non_login"
+
+[update]
+version_check = false
+manifest_check = false
+
+[keys]
+# The tape jumps back to cutie's workspace with ctrl+b 1.
+switch_tab = ""
+switch_workspace = "prefix+1..9"

@@ -1,0 +1,21 @@
+# Builds the release binaries when a v* tag is pushed (.github/workflows/release.yml).
+# Try it locally without publishing: goreleaser release --snapshot --clean
+version: 2
+
+builds:
+  - env: [CGO_ENABLED=0]
+    goos: [darwin, linux]
+    goarch: [amd64, arm64]
+    ldflags:
+      - -s -w -X main.version={{.Version}}
+
+archives:
+  - name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files: [LICENSE, README.md, CHANGELOG.md]
+
+checksum:
+  name_template: checksums.txt
+
+# Release notes come from the merged pull requests, grouped by .github/release.yml.
+changelog:
+  use: github-native

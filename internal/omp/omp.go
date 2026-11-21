@@ -22,7 +22,9 @@ type Limit struct {
 	ResetsAt time.Time
 }
 
-// FetchLimits reads the Anthropic plan windows that every Claude model shares.
+// FetchLimits reads the Anthropic plan windows that every Claude model shares, one set
+// per logged-in account. omp keeps each account's last report, which can be hours old;
+// a window whose reset time has passed since then has started over, so it counts as unused.
 func FetchLimits() ([]Limit, error) {
 	var resp struct {
 		Reports []struct {
@@ -47,7 +49,11 @@ func FetchLimits() ([]Limit, error) {
 			if l.ID != "anthropic:"+l.Window.ID { // skip per-model windows like anthropic:7d:fable
 				continue
 			}
-			limits = append(limits, Limit{Window: l.Window.ID, Used: l.Amount.UsedFraction, ResetsAt: time.UnixMilli(l.Window.ResetsAt)})
+			lim := Limit{Window: l.Window.ID, Used: l.Amount.UsedFraction, ResetsAt: time.UnixMilli(l.Window.ResetsAt)}
+			if !lim.ResetsAt.IsZero() && time.Now().After(lim.ResetsAt) {
+				lim.Used = 0
+			}
+			limits = append(limits, lim)
 		}
 	}
 	return limits, nil

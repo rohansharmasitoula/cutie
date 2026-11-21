@@ -262,3 +262,19 @@ func FocusAgent(name string) error {
 func ClosePane(paneID string) error {
 	return herdr(nil, "pane", "close", paneID)
 }
+
+// RunInPane types command into a pane's shell and runs it.
+func RunInPane(paneID, command string) error {
+	return herdr(nil, "pane", "run", paneID, command)
+}
+
+// ReportAgent tells herdr that the program in paneID is an agent of the given kind in
+// state (idle, working or blocked), for programs herdr can't detect by itself.
+func ReportAgent(paneID, kind, state, message string) error {
+	return herdr(nil, "pane", "report-agent", paneID, "--source", "cutie", "--agent", kind, "--state", state, "--message", message)
+}
+
+// RenameAgent names the agent in paneID, so cutie can find it by name.
+func RenameAgent(paneID, name string) error {
+	return herdr(nil, "agent", "rename", paneID, name)
+}

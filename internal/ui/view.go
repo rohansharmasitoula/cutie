@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"github.com/rohansharmasitoula/cutie/internal/agents"
 	"github.com/rohansharmasitoula/cutie/internal/github"
 	"github.com/rohansharmasitoula/cutie/internal/herdr"
 	"github.com/rohansharmasitoula/cutie/internal/utils"
@@ -275,8 +276,14 @@ func (m model) headerBar() string {
 	if n := counts["blocked"]; n > 0 {
 		parts = append(parts, bad.Bold(true).Render(fmt.Sprintf("▲ %d need you", n)))
 	}
+	if n := len(m.modes); n > 0 {
+		parts = append(parts, bad.Render(fmt.Sprintf("✈ %d on autopilot", n)))
+	}
 	if n := len(m.queue); n > 0 {
 		parts = append(parts, warn.Render(fmt.Sprintf("⧗ %d queued", n)))
+	}
+	if m.latest != "" {
+		parts = append(parts, good.Bold(true).Render("⬆ "+m.latest+" available · ? shows how"))
 	}
 	if m.paused {
 		what := "watchers"
@@ -310,7 +317,7 @@ func (m model) footer() string {
 			line1 = dim.Render(" " + m.status)
 		}
 	}
-	keys := " enter agent · a queue review · w watch · p prompt · x close agent · o open · tab mine/review/issues · / filter · s sort · g group · b bots · d drafts · space fold · R force · drag borders to resize · = reset · ? help · q quit"
+	keys := " enter agent · a queue review · m copilot/autopilot (per PR) · w watch · p prompt · x close agent · o open · tab mine/review/issues · / filter · s sort · g group · b bots · d drafts · space fold · R force · drag borders to resize · = reset · ? help · q quit"
 	return utils.Fit(line1, m.width) + "\n" + dim.Render(utils.Fit(keys, m.width))
 }
 
@@ -410,6 +417,9 @@ func (m model) renderItem(it item, selected bool, w int) string {
 	}
 
 	right := m.agentCell(prWork(p))
+	if !p.Mine {
+		right = append(right, m.modeMark(p))
+	}
 	if pos := m.queuePos(p.Key()); pos > 0 {
 		right = append(right, warn.Render(fmt.Sprintf("⧗ queue %d", pos)))
 	}
@@ -417,7 +427,7 @@ func (m model) renderItem(it item, selected bool, w int) string {
 		right = append(right, bad.Render(fmt.Sprintf("%d open", n)))
 	}
 	if n := p.Unresolved() - p.Open(); n > 0 {
-		right = append(right, dim.Render(fmt.Sprintf("%d replied", n)))
+		right = append(right, dim.Render(fmt.Sprintf("%d on reviewer", n)))
 	}
 	if !p.Mine {
 		right = append(right, dim.Render("@"+p.Author))
@@ -536,6 +546,10 @@ func waitColor(d time.Duration) lipgloss.Color {
 
 func (m model) detail(w int) (string, []string) {
 	if m.help {
+		if m.latest != "" {
+			update := []string{good.Bold(true).Render("⬆ cutie " + m.latest + " is out"), "  " + updateHint(m.cfg.ReleaseBuild), ""}
+			return "Help", append(update, helpLines()...)
+		}
 		return "Help", helpLines()
 	}
 	it := m.selectedItem()
@@ -618,6 +632,14 @@ func (m model) detail(w int) (string, []string) {
 			what = "an orchestrator"
 		}
 	}
+	if !p.Mine {
+		add(bold.Render("Review mode ") + m.modeMark(p) + dim.Render(" · m switches, also mid-review"))
+		if m.modeFor(p) == agents.Autopilot {
+			add(dim.Render("posts the review with a verdict and opens follow-up issues by itself"))
+		} else {
+			add(dim.Render("drafts the review, verdict and follow-up issues, then waits for your OK"))
+		}
+	}
 	add("")
 	add(m.agentLines(prWork(p), what)...)
 
@@ -625,7 +647,7 @@ func (m model) detail(w int) (string, []string) {
 	if n := p.Unresolved(); n > 0 {
 		head := fmt.Sprintf("Unresolved threads (%d)", n)
 		if r := n - p.Open(); r > 0 {
-			head += fmt.Sprintf(" · %d replied by @%s, waiting on the reviewer", r, p.Author)
+			head += fmt.Sprintf(" · %d waiting on the reviewer (replied or re-requested)", r)
 		}
 		add("", bold.Render(head))
 		for _, t := range p.Threads {
@@ -634,7 +656,7 @@ func (m model) detail(w int) (string, []string) {
 				loc = fmt.Sprintf("%s:%d", t.Path, t.Line)
 			}
 			mark := bad.Render("● ")
-			if t.Replied {
+			if t.OnReviewer {
 				mark = dim.Render("↩ ")
 			}
 			add(mark + warn.Render(t.Author) + dim.Render(" · ") + loc)
@@ -727,6 +749,7 @@ func helpLines() []string {
 		{"x x", "close the row's agent pane (asks first)"},
 		{"w", "watch a PR: wake the agent on new feedback / a re-request"},
 		{"a", "queue a review: agents review one PR at a time (again to unqueue)"},
+		{"m", "review mode of the PR: copilot waits for your OK, autopilot posts, approves / requests changes and opens follow-up issues (works mid-review)"},
 		{"o", "open the PR or issue in the browser"},
 		{"tab, 1, 2, 3", "Mine / Review / Issues"},
 		{"/", "filter by text (esc clears)"},
@@ -781,12 +804,20 @@ func (m model) queueLines(w int) []string {
 			continue
 		}
 		left := fmt.Sprintf("%s %s %s", dim.Render(fmt.Sprint(i+1)), bold.Render(ref(p)), p.Title)
-		l = append(l, utils.Spread(left, fg(statusColor[p.Status], p.Status.Label()), w))
+		l = append(l, utils.Spread(left, m.modeMark(p)+" "+fg(statusColor[p.Status], p.Status.Label()), w))
 	}
 	if more := len(m.queue) - queueShown; more > 0 {
 		l = append(l, dim.Render(fmt.Sprintf("… %d more", more)))
 	}
 	return append(l, "")
+}
+
+// modeMark is a review PR's mode as a short coloured tag.
+func (m model) modeMark(p github.PR) string {
+	if m.modeFor(p) == agents.Autopilot {
+		return bad.Render("✈ auto")
+	}
+	return dim.Render("✋ co")
 }
 
 func (m model) agentsBody(w int) []string {

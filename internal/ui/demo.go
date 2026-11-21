@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"strconv"
 	"strings"
 	"time"
 
@@ -19,7 +20,7 @@ func demoPRs() (mine, review []github.PR) {
 	pr := func(repo string, n int, title, author, branch, base string, st github.Status, mineSide bool) github.PR {
 		return github.PR{
 			Repo: "acme/" + repo, RepoName: repo, Number: n, Title: title, Author: author,
-			URL: "https://github.com/acme/" + repo + "/pull/", Branch: branch, Base: base,
+			URL: "https://github.com/acme/" + repo + "/pull/" + strconv.Itoa(n), Branch: branch, Base: base,
 			HeadOID: "4f2c9a1e", Status: st, Mine: mineSide, CI: "SUCCESS",
 			UpdatedAt: ago(time.Duration(n%9+1) * time.Hour), LastCommit: ago(time.Duration(n%5+1) * 7 * time.Hour),
 		}
@@ -33,7 +34,7 @@ func demoPRs() (mine, review []github.PR) {
 	auth.Threads = []github.Thread{
 		{Author: "maya", Path: "auth/refresh.go", Line: 88, Body: "concern: the old token stays valid until expiry, so a stolen one keeps working after rotation."},
 		{Author: "maya", Path: "auth/refresh_test.go", Line: 12, Body: "suggestion: add a test that replays a rotated token and expects 401."},
-		{Author: "leo", Path: "docs/auth.md", Line: 40, Body: "question: should the docs mention the new grace window?", Replied: true},
+		{Author: "leo", Path: "docs/auth.md", Line: 40, Body: "question: should the docs mention the new grace window?", OnReviewer: true},
 	}
 	stack1 := pr("api", 418, "Feat | Billing | usage meter read model", "you", "you/418-usage-meter", "main", github.StatusInReview, true)
 	stack2 := pr("api", 421, "Feat | Billing | invoices read from the usage meter", "you", "you/421-invoices", "you/418-usage-meter", github.StatusInReview, true)
@@ -68,7 +69,7 @@ func demoIssues() []github.Issue {
 	issue := func(repo string, n int, title, author string, labels []string, comments int, age time.Duration, body string) github.Issue {
 		return github.Issue{
 			Repo: "acme/" + repo, RepoName: repo, Number: n, Title: title, Author: author, Labels: labels,
-			URL: "https://github.com/acme/" + repo + "/issues/", Comments: comments, Body: body,
+			URL: "https://github.com/acme/" + repo + "/issues/" + strconv.Itoa(n), Comments: comments, Body: body,
 			CreatedAt: now.Add(-4 * age), UpdatedAt: now.Add(-age),
 		}
 	}

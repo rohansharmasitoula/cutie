@@ -96,8 +96,9 @@ type Thread struct {
 	Path   string
 	Line   int
 	Body   string
-	// Replied: the PR author wrote the thread's last comment, so the next move is the reviewer's.
-	Replied bool
+	// OnReviewer: the next move is the reviewer's, because the PR author wrote the
+	// thread's last comment or re-requested a review from whoever did.
+	OnReviewer bool
 }
 
 type PR struct {
@@ -137,7 +138,7 @@ func (p PR) Unresolved() int { return len(p.Threads) }
 func (p PR) Open() int {
 	n := 0
 	for _, t := range p.Threads {
-		if !t.Replied {
+		if !t.OnReviewer {
 			n++
 		}
 	}
@@ -486,6 +487,15 @@ func convert(r rawPR, me string, mine, requested bool) PR {
 		p.Author = r.Author.Login
 		p.IsBot = !r.Author.human()
 	}
+	// asked holds the users GitHub still lists as requested reviewers. Submitting a review
+	// clears the request, so a reviewer listed here who already commented was re-requested:
+	// their threads and feedback wait on them, not on you.
+	asked := map[string]bool{}
+	for _, rq := range r.ReviewRequests.Nodes {
+		if who := rq.RequestedReviewer; who != nil && who.Login != "" {
+			asked[who.Login] = true
+		}
+	}
 	for _, t := range r.ReviewThreads.Nodes {
 		if t.IsResolved {
 			continue
@@ -498,7 +508,7 @@ func convert(r rawPR, me string, mine, requested bool) PR {
 			th.Body = c[0].Body
 		}
 		if l := t.Last.Nodes; len(l) > 0 && l[0].Author != nil {
-			th.Replied = l[0].Author.Login == p.Author
+			th.OnReviewer = l[0].Author.Login == p.Author || asked[l[0].Author.Login]
 		}
 		p.Threads = append(p.Threads, th)
 	}
@@ -539,7 +549,7 @@ func convert(r rawPR, me string, mine, requested bool) PR {
 		if at.After(p.LastFeedback) {
 			p.LastFeedback = at
 		}
-		if !approved[who] && at.After(waiting) {
+		if !approved[who] && !asked[who] && at.After(waiting) {
 			waiting = at
 		}
 	}
@@ -579,8 +589,8 @@ func convert(r rawPR, me string, mine, requested bool) PR {
 		p.Status = StatusDraft
 	// A CHANGES_REQUESTED decision alone stays set after you push the fixes, until the
 	// reviewer looks again; it only means work when a thread waits on you (you were not
-	// the last to reply) or feedback from someone who has not approved is newer than
-	// your last push.
+	// the last to reply and did not re-request its reviewer) or feedback from someone
+	// who has not approved and is not re-requested is newer than your last push.
 	case p.Open() > 0 || waiting.After(p.LastCommit):
 		p.Status = StatusNeedsWork
 	case p.Decision == "APPROVED":

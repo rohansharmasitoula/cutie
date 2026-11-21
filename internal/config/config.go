@@ -18,6 +18,11 @@ type Config struct {
 	AgentKind string        // herdr agent kind started for PRs: omp, claude, codex, …
 	HasOmp    bool          // omp is installed, so Claude usage and costs can be shown
 	Demo      bool          // CUTIE_DEMO=1: made-up data, no GitHub, herdr or omp calls
+	DemoHerdr bool          // CUTIE_DEMO=herdr: made-up data, but real herdr panes with scripted agents
+
+	// Set by main, not the environment.
+	Version      string // this build's version, e.g. v0.2.0
+	ReleaseBuild bool   // a release binary (GoReleaser), so updates are downloaded, not go installed
 }
 
 // Load reads CUTIE_* variables, falling back to defaults.
@@ -41,8 +46,16 @@ func Load() (Config, error) {
 	}
 	_, err := exec.LookPath("omp")
 	c.HasOmp = err == nil
-	if os.Getenv("CUTIE_DEMO") == "1" {
+	switch os.Getenv("CUTIE_DEMO") {
+	case "1":
 		c.Demo, c.HasOmp = true, true
+	case "herdr":
+		// It creates workspaces and panes, so it only runs inside herdr; use a throwaway
+		// session (herdr --session cutie-demo) to keep them out of your own.
+		if os.Getenv("HERDR_PANE_ID") == "" {
+			return c, fmt.Errorf("CUTIE_DEMO=herdr runs inside a throwaway herdr session: start `herdr --session cutie-demo` and run it in a pane there")
+		}
+		c.Demo, c.DemoHerdr, c.HasOmp = true, true, true
 	}
 
 	if s := os.Getenv("CUTIE_INTERVAL"); s != "" {
