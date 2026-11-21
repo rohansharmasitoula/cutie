@@ -19,7 +19,7 @@ go build -o cutie .
 CUTIE_DEMO=1 ./cutie
 ```
 
-Demo mode (`CUTIE_DEMO=1`) shows made-up PRs, agents and usage, and never calls GitHub, herdr or omp. Use it for UI work; the data lives in `internal/ui/demo.go`. The README's [Project layout](README.md#project-layout) says which package owns what.
+Demo mode (`CUTIE_DEMO=1`) shows made-up PRs, agents and usage, and never calls GitHub, herdr or omp. Use it for UI work; the data lives in `internal/ui/demo.go`. `CUTIE_DEMO=herdr` keeps the made-up data but opens real herdr panes running scripted agents (`internal/ui/demoherdr.go`); run it inside a throwaway session (`herdr --session cutie-demo`) so it stays out of your own workspaces. The README's [Project layout](README.md#project-layout) says which package owns what.
 
 ## Checks
 
@@ -39,7 +39,7 @@ go test ./...
 3. Update the docs in the same pull request:
    - `README.md` for anything a user sees: keys, settings, statuses, files.
    - `CHANGELOG.md` under **Unreleased**, in the section that fits (Added, Changed, Fixed, Removed).
-   - `docs/demo.gif` if the UI changed visibly: install [vhs](https://github.com/charmbracelet/vhs) and run `env -u NO_COLOR -u CI vhs docs/demo.tape` from the repo root.
+   - `docs/demo.gif` if the UI changed visibly: install [vhs](https://github.com/charmbracelet/vhs) and herdr, then run `env -u NO_COLOR -u CI vhs docs/demo.tape` from the repo root. It records in a throwaway herdr session and removes it afterwards.
 4. Fill in the pull request template. `main` is protected: merging needs a pull request with green CI and resolved conversations, and pull requests are squash-merged.
 
 ## Releases (maintainer)

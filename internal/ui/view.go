@@ -282,6 +282,9 @@ func (m model) headerBar() string {
 	if n := len(m.queue); n > 0 {
 		parts = append(parts, warn.Render(fmt.Sprintf("⧗ %d queued", n)))
 	}
+	if m.latest != "" {
+		parts = append(parts, good.Bold(true).Render("⬆ "+m.latest+" available · ? shows how"))
+	}
 	if m.paused {
 		what := "watchers"
 		if len(m.queue) > 0 {
@@ -543,6 +546,10 @@ func waitColor(d time.Duration) lipgloss.Color {
 
 func (m model) detail(w int) (string, []string) {
 	if m.help {
+		if m.latest != "" {
+			update := []string{good.Bold(true).Render("⬆ cutie " + m.latest + " is out"), "  " + updateHint(m.cfg.ReleaseBuild), ""}
+			return "Help", append(update, helpLines()...)
+		}
 		return "Help", helpLines()
 	}
 	it := m.selectedItem()

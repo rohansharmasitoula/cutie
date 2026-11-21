@@ -27,9 +27,14 @@ type backend interface {
 	Close(pane string) error
 	Notify(title, body string) error
 	Open(url string) error
+	// LatestRelease is the tag of cutie's newest GitHub release.
+	LatestRelease() (string, error)
 }
 
 func newBackend(cfg config.Config) backend {
+	if cfg.DemoHerdr {
+		return newDemoHerdrBackend()
+	}
 	if cfg.Demo {
 		return newDemoBackend()
 	}
@@ -77,6 +82,7 @@ func (b *liveBackend) Prompt(agent, text string) error { return herdr.PromptAgen
 func (b *liveBackend) Focus(agent string) error        { return herdr.FocusAgent(agent) }
 func (b *liveBackend) Close(pane string) error         { return herdr.ClosePane(pane) }
 func (b *liveBackend) Notify(title, body string) error { return herdr.Notify(title, body) }
+func (b *liveBackend) LatestRelease() (string, error)  { return github.LatestRelease(cutieRepo) }
 
 // Open shows url in the default browser.
 func (b *liveBackend) Open(url string) error {
@@ -114,3 +120,4 @@ func (b *demoBackend) Focus(string) error                         { return nil }
 func (b *demoBackend) Close(string) error                         { return nil }
 func (b *demoBackend) Notify(string, string) error                { return nil }
 func (b *demoBackend) Open(string) error                          { return nil }
+func (b *demoBackend) LatestRelease() (string, error)             { return "", nil }

@@ -134,12 +134,16 @@ type IssueData struct {
 	Number                   int
 }
 
-// LoadPrompts reads the built-in templates, replacing any that dir overrides.
+// LoadPrompts reads the built-in templates, replacing any that dir overrides. An empty
+// dir means built-ins only, as demo mode uses.
 func LoadPrompts(dir string) (Prompts, error) {
 	ps := Prompts{t: map[string]*template.Template{}}
 	for _, name := range promptNames {
 		file := name + ".md"
-		src, err := os.ReadFile(filepath.Join(dir, file))
+		src, err := []byte(nil), fs.ErrNotExist
+		if dir != "" {
+			src, err = os.ReadFile(filepath.Join(dir, file))
+		}
 		if errors.Is(err, fs.ErrNotExist) {
 			src, err = defaultPrompts.ReadFile("prompts/" + file)
 		}

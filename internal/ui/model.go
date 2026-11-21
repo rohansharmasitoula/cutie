@@ -24,7 +24,9 @@ const (
 	agentPollInterval = 3 * time.Second
 	limitPollInterval = 60 * time.Second
 	statsPollInterval = 5 * time.Minute
-	tailLines         = 12
+	// releasePollInterval is how often cutie looks for a newer release of itself.
+	releasePollInterval = 12 * time.Hour
+	tailLines           = 12
 	// queueSettle is how long the review queue waits after any agent start or prompt,
 	// so the agent list shows the new agent working before the next review is picked.
 	queueSettle = 15 * time.Second
@@ -57,6 +59,11 @@ type ghTickMsg struct{}
 type agentTickMsg struct{}
 type limitTickMsg struct{}
 type statsTickMsg struct{}
+type releaseTickMsg struct{}
+
+// releaseMsg carries the latest release tag; "" when it couldn't be read (offline, or
+// no release yet), which is not worth an error line.
+type releaseMsg struct{ tag string }
 type dispatchMsg struct {
 	key, note string
 	err       error
@@ -103,6 +110,7 @@ type model struct {
 	// queueAfter is the earliest time the queue may pick its next review.
 	queueAfter time.Time
 	modes      state.Modes // review PR key → "autopilot"; others are copilot
+	latest     string      // a newer cutie release than this build, e.g. v0.3.0
 	// inflight marks PR and issue keys with an agent start or prompt running.
 	inflight map[string]bool
 	events   []Event
@@ -148,10 +156,10 @@ func newModel(cfg config.Config, ps agents.Prompts, w state.Watches, q state.Que
 		grouped: true, hideBots: true, loading: true, input: in,
 	}
 	if cfg.Demo { // never show or overwrite the user's real watches, queue and modes
-		mine, review := demoPRs()
+		mine, _ := demoPRs()
 		m.watches = state.Watches{mine[0].Key(): agents.Baseline(mine[0]), mine[1].Key(): agents.Baseline(mine[1])}
 		m.queue = nil
-		m.modes = state.Modes{review[1].Key(): string(agents.Autopilot)}
+		m.modes = state.Modes{} // every review starts on copilot; m shows the switch
 		m.events = demoEvents()
 	}
 	return m
@@ -221,9 +229,9 @@ func (m *model) pruneModes() {
 // Init loads everything once and starts one tick loop per data source. Ticks are only
 // rescheduled by their own handler, so manual refreshes never add loops.
 func (m model) Init() tea.Cmd {
-	return tea.Batch(m.fetchPRs(), m.fetchLimits(), m.fetchStats(),
+	return tea.Batch(m.fetchPRs(), m.fetchLimits(), m.fetchStats(), m.fetchRelease(),
 		func() tea.Msg { return agentTickMsg{} },
-		m.tick(ghTickMsg{}), m.tick(limitTickMsg{}), m.tick(statsTickMsg{}))
+		m.tick(ghTickMsg{}), m.tick(limitTickMsg{}), m.tick(statsTickMsg{}), m.tick(releaseTickMsg{}))
 }
 
 func (m model) tick(msg tea.Msg) tea.Cmd {
@@ -235,6 +243,8 @@ func (m model) tick(msg tea.Msg) tea.Cmd {
 		d = limitPollInterval
 	case statsTickMsg:
 		d = statsPollInterval
+	case releaseTickMsg:
+		d = releasePollInterval
 	}
 	return tea.Tick(d, func(time.Time) tea.Msg { return msg })
 }
@@ -305,6 +315,17 @@ func (m model) fetchStats() tea.Cmd {
 	return func() tea.Msg {
 		s, err := be.Stats()
 		return statsMsg{s, err}
+	}
+}
+
+func (m model) fetchRelease() tea.Cmd {
+	be := m.be
+	return func() tea.Msg {
+		tag, err := be.LatestRelease()
+		if err != nil {
+			tag = ""
+		}
+		return releaseMsg{tag}
 	}
 }
 
@@ -1065,6 +1086,13 @@ func (m model) update(msg tea.Msg) (model, tea.Cmd) {
 		return m, tea.Batch(m.fetchLimits(), m.tick(msg))
 	case statsTickMsg:
 		return m, tea.Batch(m.fetchStats(), m.tick(msg))
+	case releaseTickMsg:
+		return m, tea.Batch(m.fetchRelease(), m.tick(msg))
+	case releaseMsg:
+		if msg.tag != m.latest && newerRelease(m.cfg.Version, msg.tag) {
+			m.latest = msg.tag
+			m.addEvents(Event{time.Now(), EventGood, fmt.Sprintf("cutie %s is out (you have %s): %s", msg.tag, m.cfg.Version, updateHint(m.cfg.ReleaseBuild))})
+		}
 
 	case dispatchMsg:
 		delete(m.inflight, msg.key)

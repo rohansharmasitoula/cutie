@@ -10,8 +10,9 @@ Notable changes to cutie. The format follows [Keep a Changelog](https://keepacha
 - `{{.Posting}}` in the review prompts carries the mode's rule on posting. Custom `review-start.md` and `review-followup.md` must contain it, or cutie refuses to start.
 - Review queue: `a` queues a PR you review, and the queue starts one review at a time. The Agents panel lists it.
 - The Issues tab shows each issue's linked PRs.
-- `cutie --version`.
+- `cutie --version`, and a notice when a newer release is out: `⬆ vX.Y.Z available` in the top bar, with the update command in the Activity panel and `?` help.
 - Release binaries for macOS and Linux on every tag.
+- `CUTIE_DEMO=herdr`: the demo data with real herdr panes and scripted agents, used to record the demo GIF.
 
 ### Changed
 

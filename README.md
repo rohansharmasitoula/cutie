@@ -56,7 +56,7 @@ Or download a binary for macOS or Linux (Intel or ARM) from [Releases](https://g
 
 ### Updating
 
-Run the same `go install …@latest` again, or download the newest release. `cutie --version` shows what you have.
+cutie checks for a newer release when it starts and every 12 hours. When there is one, the top bar shows `⬆ vX.Y.Z available`, and the Activity panel and `?` help show the command that updates your copy: `go install github.com/rohansharmasitoula/cutie@latest`, or the release page if you downloaded a binary. `cutie --version` shows what you have.
 
 To hear about new versions, open the repo on GitHub and choose **Watch → Custom → Releases**. Each release lists its changes, and [CHANGELOG.md](CHANGELOG.md) keeps the full history, including what's merged but not released yet.
 
@@ -81,7 +81,7 @@ CUTIE_DEMO=1 cutie
 | `CUTIE_INTERVAL` | `60` | Seconds between GitHub refreshes (minimum 10) |
 | `CUTIE_WATCH_MINUTES` | `30` | Minutes between watcher checks |
 | `CUTIE_GUARD` | `85` | Pause watchers and the review queue when the Claude 5 hour window passes this percentage (with several Claude accounts in omp, the one with the most room counts) |
-| `CUTIE_DEMO` | unset | `1` shows made-up data and calls nothing |
+| `CUTIE_DEMO` | unset | `1` shows made-up data and calls nothing. `herdr` keeps the made-up data but opens real herdr panes with scripted agents (no AI); run it in a throwaway session, `herdr --session cutie-demo` |
 
 ### Prompts
 
@@ -189,7 +189,7 @@ internal/
   state/                 watches, review queue, review modes and panel sizes on disk
   ui/                    Bubble Tea model, views, demo data
   utils/                 running CLIs, formatting, text layout
-docs/demo.tape           recording script for docs/demo.gif
+docs/demo.tape           recording script for docs/demo.gif (herdr settings: docs/herdr-demo.toml)
 ```
 
 ## Contributing

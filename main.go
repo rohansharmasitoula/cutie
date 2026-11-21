@@ -24,6 +24,18 @@ func main() {
 		fmt.Println("cutie", buildVersion())
 		return
 	}
+	// The scripted agent CUTIE_DEMO=herdr starts in its panes; not for direct use.
+	if len(os.Args) > 2 && os.Args[1] == "demo-agent" {
+		promptFile := ""
+		if len(os.Args) > 3 {
+			promptFile = os.Args[3]
+		}
+		if err := ui.RunDemoAgent(os.Args[2], promptFile); err != nil {
+			fmt.Fprintln(os.Stderr, "cutie demo-agent:", err)
+			os.Exit(1)
+		}
+		return
+	}
 	if err := run(); err != nil {
 		fmt.Fprintln(os.Stderr, "cutie:", err)
 		os.Exit(1)
@@ -45,7 +57,12 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	prompts, err := agents.LoadPrompts(filepath.Join(state.Dir(), "prompts"))
+	cfg.Version, cfg.ReleaseBuild = buildVersion(), version != ""
+	promptDir := filepath.Join(state.Dir(), "prompts")
+	if cfg.Demo { // demo agents show the built-in prompts, not your own
+		promptDir = ""
+	}
+	prompts, err := agents.LoadPrompts(promptDir)
 	if err != nil {
 		return utils.Wrap("loading prompts", err)
 	}
