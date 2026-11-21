@@ -4,6 +4,8 @@ Notable changes to cutie. The format follows [Keep a Changelog](https://keepacha
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-21
+
 ### Added
 
 - Review mode per PR you review: copilot drafts the review and waits for your OK, autopilot posts it with a verdict and opens follow-up issues by itself. `m` switches it, even mid-review. Kept in `modes.json`.
@@ -45,7 +47,8 @@ Notable changes to cutie. The format follows [Keep a Changelog](https://keepacha
 
 - First release: the PR dashboard with herdr agents, Claude usage from omp, watchers, configurable prompts and agent kind, demo mode and CI.
 
-[Unreleased]: https://github.com/rohansharmasitoula/cutie/compare/v0.1.3...HEAD
+[Unreleased]: https://github.com/rohansharmasitoula/cutie/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/rohansharmasitoula/cutie/compare/v0.1.3...v0.2.0
 [0.1.3]: https://github.com/rohansharmasitoula/cutie/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/rohansharmasitoula/cutie/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/rohansharmasitoula/cutie/compare/v0.1.0...v0.1.1
