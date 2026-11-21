@@ -4,6 +4,10 @@ Notable changes to cutie. The format follows [Keep a Changelog](https://keepacha
 
 ## [Unreleased]
 
+### Changed
+
+- Building or `go install`ing cutie needs Go 1.26+ (was 1.24+), after the dependency update to bubbles v1.0.0.
+
 ## [0.2.0] - 2026-11-21
 
 ### Added

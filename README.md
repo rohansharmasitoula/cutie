@@ -36,7 +36,7 @@ cutie lists your open PRs and the PRs waiting for your review, tells you which o
 | A coding agent herdr supports (`omp`, `claude`, `codex`, …) | Works on the PRs | ✅ |
 | [`omp`](https://github.com/can1357/oh-my-pi) | Claude usage panel and agent costs | Optional |
 
-macOS and Linux. Go 1.24+ to build.
+macOS and Linux. Go 1.26+ to build or `go install`; the release binaries need no Go.
 
 ## Install
 
