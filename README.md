@@ -52,6 +52,14 @@ cd cutie
 go build -o ~/.local/bin/cutie .
 ```
 
+Or download a binary for macOS or Linux (Intel or ARM) from [Releases](https://github.com/rohansharmasitoula/cutie/releases), unpack it and put `cutie` on your `PATH`.
+
+### Updating
+
+Run the same `go install …@latest` again, or download the newest release. `cutie --version` shows what you have.
+
+To hear about new versions, open the repo on GitHub and choose **Watch → Custom → Releases**. Each release lists its changes, and [CHANGELOG.md](CHANGELOG.md) keeps the full history, including what's merged but not released yet.
+
 ## Quick start
 
 1. Keep your clones in one folder, each named after its repo, either directly (`~/Development/api`) or one folder down (`~/Development/acme/api`). Point cutie at it with `CUTIE_ROOT` if it isn't `~/Development`.
@@ -183,6 +191,10 @@ internal/
   utils/                 running CLIs, formatting, text layout
 docs/demo.tape           recording script for docs/demo.gif
 ```
+
+## Contributing
+
+Bug reports, ideas and pull requests are welcome: [CONTRIBUTING.md](CONTRIBUTING.md) covers setup, the checks CI runs and how releases work. Please follow the [Code of Conduct](CODE_OF_CONDUCT.md), and report security problems privately as [SECURITY.md](SECURITY.md) describes.
 
 ## ☕ Support
 

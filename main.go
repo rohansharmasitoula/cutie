@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 
 	"github.com/rohansharmasitoula/cutie/internal/agents"
 	"github.com/rohansharmasitoula/cutie/internal/config"
@@ -14,11 +15,29 @@ import (
 	"github.com/rohansharmasitoula/cutie/internal/utils"
 )
 
+// version is set by release builds (.goreleaser.yaml); go install builds fall back to
+// the module version Go records in the binary.
+var version = ""
+
 func main() {
+	if len(os.Args) > 1 && (os.Args[1] == "--version" || os.Args[1] == "-v") {
+		fmt.Println("cutie", buildVersion())
+		return
+	}
 	if err := run(); err != nil {
 		fmt.Fprintln(os.Stderr, "cutie:", err)
 		os.Exit(1)
 	}
+}
+
+func buildVersion() string {
+	if version != "" {
+		return version
+	}
+	if bi, ok := debug.ReadBuildInfo(); ok {
+		return bi.Main.Version
+	}
+	return "unknown"
 }
 
 func run() error {

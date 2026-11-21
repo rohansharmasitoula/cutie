@@ -1,0 +1,42 @@
+name: Bug report
+description: Something in cutie doesn't work as the README says.
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected and what you saw instead. A screenshot of the dashboard helps.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Does it also happen in demo mode (`CUTIE_DEMO=1 cutie`)?
+      placeholder: |
+        1. Open the Review tab
+        2. Press `a` on a PR marked `to review`
+        3. …
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: cutie version
+      description: Output of `cutie --version`.
+    validations:
+      required: true
+  - type: input
+    id: system
+    attributes:
+      label: System
+      description: OS, terminal, agent kind (`CUTIE_AGENT`), and herdr / gh / omp versions if they matter.
+      placeholder: macOS 15, Ghostty, omp, herdr 0.9, gh 2.70
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Error output or Activity panel lines
+      render: text
